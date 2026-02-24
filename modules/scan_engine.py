@@ -281,8 +281,19 @@ class ScanEngine:
                 (result['mission_id'], result['ip_address'])
             ).fetchone()
             if not row:
-                return
-            host_id = row['id']
+                # Auto-create host so the service isn't silently dropped
+                cursor = db.execute("""
+                    INSERT INTO hosts (mission_id, ip_address, device_type, criticality,
+                        discovered_via, subnet_id)
+                    VALUES (?, ?, 'unknown', 'medium', 'active', ?)
+                """, (
+                    result['mission_id'], result['ip_address'],
+                    self._find_subnet(db, result['mission_id'], result['ip_address'])
+                ))
+                host_id = cursor.lastrowid
+                logger.info(f"Auto-created host {result['ip_address']} for service ingestion")
+            else:
+                host_id = row['id']
 
         port = result['port']
         protocol = result.get('protocol', 'tcp')
