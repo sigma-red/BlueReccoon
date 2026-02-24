@@ -199,6 +199,14 @@ class ScanEngine:
                 self._ingest_privileged_account(db, result)
             elif rtype == 'ot_device':
                 self._ingest_ot_device(db, result)
+            elif rtype == 'software':
+                self._ingest_software(db, result)
+            elif rtype == 'process':
+                self._ingest_process(db, result)
+            elif rtype == 'scheduled_task':
+                self._ingest_scheduled_task(db, result)
+            elif rtype == 'local_group':
+                self._ingest_local_group(db, result)
             elif rtype == 'host_update':
                 self._update_host_fields(db, result)
 
@@ -487,6 +495,156 @@ class ScanEngine:
                 host_id, result.get('device_class'), result.get('vendor'),
                 result.get('model'), result.get('firmware'), result.get('serial_number'),
                 result.get('protocol'), result.get('master_slave_role'), result.get('notes')
+            ))
+
+    def _resolve_host_id(self, db, result):
+        """Resolve host_id from result, looking up by IP if needed."""
+        host_id = result.get('host_id')
+        if host_id:
+            return host_id
+        row = db.execute(
+            "SELECT id FROM hosts WHERE mission_id = ? AND ip_address = ?",
+            (result['mission_id'], result['ip_address'])
+        ).fetchone()
+        return row['id'] if row else None
+
+    def _ingest_software(self, db, result):
+        """Insert an installed software entry."""
+        host_id = self._resolve_host_id(db, result)
+        if not host_id:
+            return
+        # Avoid duplicates by name+version
+        existing = db.execute(
+            "SELECT id FROM software_inventory WHERE host_id = ? AND name = ? AND version = ?",
+            (host_id, result['name'], result.get('version', ''))
+        ).fetchone()
+        if not existing:
+            db.execute("""
+                INSERT INTO software_inventory (host_id, name, version, publisher,
+                    install_date, install_source, architecture)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                host_id, result['name'], result.get('version', ''),
+                result.get('publisher', ''), result.get('install_date', ''),
+                result.get('install_source', ''), result.get('architecture', '')
+            ))
+
+    def _ingest_process(self, db, result):
+        """Insert a running process or service entry."""
+        host_id = self._resolve_host_id(db, result)
+        if not host_id:
+            return
+        is_service = result.get('is_service', 0)
+        name = result.get('name', '')
+        # For services, avoid duplicates by service_name
+        if is_service:
+            svc_name = result.get('service_name', name)
+            existing = db.execute(
+                "SELECT id FROM running_processes WHERE host_id = ? AND is_service = 1 AND service_name = ?",
+                (host_id, svc_name)
+            ).fetchone()
+            if existing:
+                db.execute("""
+                    UPDATE running_processes SET service_state = ?, start_type = ?,
+                        service_display_name = ?, collected_at = datetime('now')
+                    WHERE id = ?
+                """, (
+                    result.get('service_state', ''), result.get('start_type', ''),
+                    result.get('service_display_name', ''), existing['id']
+                ))
+                return
+        else:
+            # For processes, avoid duplicates by pid (per collection run)
+            pid = result.get('pid')
+            if pid is not None:
+                existing = db.execute(
+                    "SELECT id FROM running_processes WHERE host_id = ? AND pid = ? AND is_service = 0",
+                    (host_id, pid)
+                ).fetchone()
+                if existing:
+                    return
+
+        db.execute("""
+            INSERT INTO running_processes (host_id, pid, name, exe_path, command_line,
+                username, parent_pid, is_service, service_name, service_display_name,
+                service_state, start_type, memory_bytes, cpu_percent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            host_id, result.get('pid'), name,
+            result.get('exe_path', ''), result.get('command_line', ''),
+            result.get('username', ''), result.get('parent_pid'),
+            is_service, result.get('service_name', ''),
+            result.get('service_display_name', ''),
+            result.get('service_state', ''), result.get('start_type', ''),
+            result.get('memory_bytes'), result.get('cpu_percent')
+        ))
+
+    def _ingest_scheduled_task(self, db, result):
+        """Insert a scheduled task entry."""
+        host_id = self._resolve_host_id(db, result)
+        if not host_id:
+            return
+        task_name = result['task_name']
+        source = result.get('source', '')
+        # Avoid duplicates by task_name + source
+        existing = db.execute(
+            "SELECT id FROM scheduled_tasks WHERE host_id = ? AND task_name = ? AND source = ?",
+            (host_id, task_name, source)
+        ).fetchone()
+        if existing:
+            db.execute("""
+                UPDATE scheduled_tasks SET status = ?, next_run = ?, last_run = ?,
+                    last_result = ?, collected_at = datetime('now')
+                WHERE id = ?
+            """, (
+                result.get('status', ''), result.get('next_run', ''),
+                result.get('last_run', ''), result.get('last_result', ''),
+                existing['id']
+            ))
+            return
+
+        db.execute("""
+            INSERT INTO scheduled_tasks (host_id, task_name, task_path, status,
+                next_run, last_run, last_result, author, run_as_user,
+                command, trigger_info, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            host_id, task_name, result.get('task_path', ''),
+            result.get('status', ''), result.get('next_run', ''),
+            result.get('last_run', ''), result.get('last_result', ''),
+            result.get('author', ''), result.get('run_as_user', ''),
+            result.get('command', ''), result.get('trigger_info', ''),
+            source
+        ))
+
+    def _ingest_local_group(self, db, result):
+        """Insert a local group entry."""
+        host_id = self._resolve_host_id(db, result)
+        if not host_id:
+            return
+        group_name = result['group_name']
+        group_type = result.get('group_type', 'local')
+        # Avoid duplicates
+        existing = db.execute(
+            "SELECT id FROM local_groups WHERE host_id = ? AND group_name = ? AND group_type = ?",
+            (host_id, group_name, group_type)
+        ).fetchone()
+        members_json = json.dumps(result.get('members', []))
+        if existing:
+            db.execute("""
+                UPDATE local_groups SET members = ?, description = ?,
+                    is_privileged = ?, collected_at = datetime('now')
+                WHERE id = ?
+            """, (members_json, result.get('description', ''),
+                  result.get('is_privileged', 0), existing['id']))
+        else:
+            db.execute("""
+                INSERT INTO local_groups (host_id, group_name, group_type, members,
+                    description, is_privileged)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                host_id, group_name, group_type, members_json,
+                result.get('description', ''), result.get('is_privileged', 0)
             ))
 
     def _update_host_fields(self, db, result):

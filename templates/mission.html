@@ -133,6 +133,7 @@
     // ── Stats ──
     async function loadStats() {
         const stats = await fetchJSON(`/api/missions/${MISSION_ID}/stats`);
+        const profileStats = stats.profile || {};
         document.getElementById('missionStats').innerHTML = `
             <div class="stat-card"><div class="stat-value">${stats.hosts.total}</div><div class="stat-label">Hosts Discovered</div></div>
             <div class="stat-card"><div class="stat-value">${stats.hosts.alive}</div><div class="stat-label">Hosts Alive</div></div>
@@ -140,6 +141,7 @@
             <div class="stat-card"><div class="stat-value" style="color:var(--accent-red)">${stats.services.ot_protocols}</div><div class="stat-label">OT Protocols</div></div>
             <div class="stat-card"><div class="stat-value">${stats.subnets}</div><div class="stat-label">Subnets</div></div>
             <div class="stat-card"><div class="stat-value">${stats.connections}</div><div class="stat-label">Connections</div></div>
+            ${profileStats.hosts_profiled ? `<div class="stat-card"><div class="stat-value" style="color:var(--accent-green)">${profileStats.hosts_profiled}</div><div class="stat-label">Hosts Profiled</div></div>` : ''}
         `;
     }
 
@@ -273,6 +275,109 @@
                     ${detailRow('Serial', o.serial_number)}
                     ${detailRow('Protocol', o.protocol)}
                     ${detailRow('Role', o.master_slave_role)}
+                </div>
+            </div>`;
+        }
+
+        // Installed Software
+        if (data.software && data.software.length > 0) {
+            html += `<div class="panel" style="margin-bottom:16px;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">
+                    Installed Software (${data.software.length})
+                </div>
+                <div style="max-height:250px;overflow-y:auto;">
+                <table class="data-table"><thead><tr><th>Name</th><th>Version</th><th>Publisher</th><th>Source</th></tr></thead><tbody>
+                ${data.software.map(s => `<tr>
+                    <td style="color:var(--text-bright);font-size:11px;">${s.name}</td>
+                    <td style="font-size:11px;">${s.version || '—'}</td>
+                    <td style="font-size:11px;color:var(--text-muted);">${s.publisher || '—'}</td>
+                    <td><span class="badge badge-blue" style="font-size:9px;">${s.install_source || '—'}</span></td>
+                </tr>`).join('')}
+                </tbody></table>
+                </div>
+            </div>`;
+        }
+
+        // Running Processes
+        if (data.processes && data.processes.length > 0) {
+            html += `<div class="panel" style="margin-bottom:16px;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">
+                    Running Processes (${data.processes.length})
+                </div>
+                <div style="max-height:250px;overflow-y:auto;">
+                <table class="data-table"><thead><tr><th>PID</th><th>Name</th><th>User</th><th>Memory</th></tr></thead><tbody>
+                ${data.processes.map(p => `<tr>
+                    <td style="color:var(--accent-cyan);font-size:11px;">${p.pid || '—'}</td>
+                    <td style="color:var(--text-bright);font-size:11px;">${p.name}</td>
+                    <td style="font-size:11px;color:var(--text-muted);">${p.username || '—'}</td>
+                    <td style="font-size:11px;">${p.memory_bytes ? formatBytes(p.memory_bytes) : '—'}</td>
+                </tr>`).join('')}
+                </tbody></table>
+                </div>
+            </div>`;
+        }
+
+        // Host Services (Windows services / systemd units)
+        if (data.host_services && data.host_services.length > 0) {
+            html += `<div class="panel" style="margin-bottom:16px;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">
+                    System Services (${data.host_services.length})
+                </div>
+                <div style="max-height:250px;overflow-y:auto;">
+                <table class="data-table"><thead><tr><th>Service</th><th>Display Name</th><th>State</th><th>Start</th><th>User</th></tr></thead><tbody>
+                ${data.host_services.map(s => {
+                    const stateColor = s.service_state === 'running' ? 'var(--accent-green)' : s.service_state === 'stopped' || s.service_state === 'dead' ? 'var(--accent-red)' : 'var(--text-muted)';
+                    return `<tr>
+                        <td style="color:var(--text-bright);font-size:11px;">${s.service_name || s.name}</td>
+                        <td style="font-size:11px;">${s.service_display_name || '—'}</td>
+                        <td><span style="color:${stateColor};font-size:11px;font-weight:500;">${s.service_state || '—'}</span></td>
+                        <td style="font-size:11px;color:var(--text-muted);">${s.start_type || '—'}</td>
+                        <td style="font-size:11px;color:var(--text-muted);">${s.username || '—'}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody></table>
+                </div>
+            </div>`;
+        }
+
+        // Scheduled Tasks
+        if (data.scheduled_tasks && data.scheduled_tasks.length > 0) {
+            html += `<div class="panel" style="margin-bottom:16px;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">
+                    Scheduled Tasks (${data.scheduled_tasks.length})
+                </div>
+                <div style="max-height:250px;overflow-y:auto;">
+                <table class="data-table"><thead><tr><th>Name</th><th>Command</th><th>Run As</th><th>Status</th><th>Source</th></tr></thead><tbody>
+                ${data.scheduled_tasks.map(t => `<tr>
+                    <td style="color:var(--text-bright);font-size:11px;">${t.task_name}</td>
+                    <td style="font-size:10px;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(t.command||'').replace(/"/g,'&quot;')}">${t.command || '—'}</td>
+                    <td style="font-size:11px;">${t.run_as_user || '—'}</td>
+                    <td style="font-size:11px;">${t.status || '—'}</td>
+                    <td><span class="badge badge-blue" style="font-size:9px;">${t.source || '—'}</span></td>
+                </tr>`).join('')}
+                </tbody></table>
+                </div>
+            </div>`;
+        }
+
+        // Local Groups
+        if (data.local_groups && data.local_groups.length > 0) {
+            html += `<div class="panel" style="margin-bottom:16px;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">
+                    Local Groups (${data.local_groups.length})
+                </div>
+                <div style="max-height:250px;overflow-y:auto;">
+                <table class="data-table"><thead><tr><th>Group</th><th>Type</th><th>Members</th></tr></thead><tbody>
+                ${data.local_groups.map(g => {
+                    const members = JSON.parse(g.members || '[]');
+                    const privBadge = g.is_privileged ? ' <span class="badge badge-red" style="font-size:8px;">PRIVILEGED</span>' : '';
+                    return `<tr>
+                        <td style="color:var(--text-bright);font-size:11px;">${g.group_name}${privBadge}</td>
+                        <td style="font-size:11px;color:var(--text-muted);">${g.group_type || 'local'}</td>
+                        <td style="font-size:10px;color:var(--text-secondary);">${members.length > 0 ? members.join(', ') : '<span style="color:var(--text-muted)">—</span>'}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody></table>
                 </div>
             </div>`;
         }

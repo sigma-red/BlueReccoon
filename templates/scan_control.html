@@ -507,6 +507,28 @@
                 risk: 'None to network. Promiscuous mode detectable by local tools. Captured data may contain sensitive content.',
             }
         },
+        host_profile: {
+            name: 'Host Profiling', brief: 'Deep host-level baseline: software, processes, tasks, groups', mode: 'active',
+            detail: {
+                summary: 'Authenticates to hosts via WinRM (Windows) or SSH (Linux) and collects host-level baseline data: installed software, running processes and services, scheduled tasks, and local group memberships. Requires valid credentials.',
+                network_actions: [
+                    '<strong>Windows:</strong> <code>WinRM (TCP 5985/5986)</code> — authenticates via crackmapexec, executes PowerShell commands',
+                    '<strong>Windows Software:</strong> Reads <code>HKLM\\Software\\...\\Uninstall\\*</code> registry keys (read-only)',
+                    '<strong>Windows Processes:</strong> <code>Get-CimInstance Win32_Process</code> and <code>Win32_Service</code> (WMI read-only)',
+                    '<strong>Windows Tasks:</strong> <code>Get-ScheduledTask</code> — enumerates non-Microsoft scheduled tasks',
+                    '<strong>Windows Groups:</strong> <code>Get-LocalGroup</code> + <code>Get-LocalGroupMember</code> (local group enumeration)',
+                    '<strong>Linux:</strong> <code>SSH (TCP 22)</code> — authenticates via sshpass, executes shell commands',
+                    '<strong>Linux Software:</strong> <code>dpkg-query</code> or <code>rpm -qa</code> (package manager query, read-only)',
+                    '<strong>Linux Processes:</strong> <code>ps axo</code> + <code>systemctl list-units</code> (read-only)',
+                    '<strong>Linux Tasks:</strong> <code>crontab -l</code>, <code>/etc/crontab</code>, <code>/etc/cron.d/*</code>, <code>systemctl list-timers</code>',
+                    '<strong>Linux Groups:</strong> Reads <code>/etc/group</code> (read-only)',
+                ],
+                tools_used: 'crackmapexec (WinRM), sshpass + ssh',
+                ports_touched: '5985/tcp (WinRM HTTP), 5986/tcp (WinRM HTTPS), 445/tcp (SMB for identity), 22/tcp (SSH)',
+                protocols: 'WinRM/HTTP, WS-Management, SMB, SSH',
+                risk: 'Low. All operations are read-only queries. Authenticated sessions appear in target audit logs (Windows Security Event Log, Linux auth.log). Credentials transmitted over WinRM/SSH encryption.',
+            }
+        },
         full_active: {
             name: 'Full Active Enumeration', brief: 'All active scans sequentially', mode: 'active',
             detail: {
