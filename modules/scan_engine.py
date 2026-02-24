@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CPT RECON - Scan Engine
+BLUE RECCOON - Scan Engine
 Orchestrates active and passive enumeration modules.
 Manages scan jobs, threading, progress reporting, and result ingestion.
 """
@@ -14,7 +14,7 @@ import ipaddress
 from datetime import datetime, timezone
 from queue import Queue
 
-logger = logging.getLogger('cpt-recon.engine')
+logger = logging.getLogger('blue-reccoon.engine')
 
 
 class ScanEngine:

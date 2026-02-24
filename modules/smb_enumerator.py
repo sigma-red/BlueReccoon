@@ -9,7 +9,7 @@ import re
 import logging
 from modules.base_scanner import BaseScanner
 
-logger = logging.getLogger('cpt-recon.smb')
+logger = logging.getLogger('blue-reccoon.smb')
 
 
 class SMBEnumerator(BaseScanner):

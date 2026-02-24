@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CPT RECON // Mission</title>
+    <title>BLUE RECCOON // Mission</title>
     <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
         <div class="nav-left">
             <div class="nav-logo">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#0ea5e9" stroke-width="1.5"><circle cx="12" cy="12" r="10" opacity="0.4"/><circle cx="12" cy="12" r="3"/></svg>
-                <a href="/" style="text-decoration:none;"><span class="nav-title">CPT RECON</span></a>
+                <a href="/" style="text-decoration:none;"><span class="nav-title">BLUE RECCOON</span></a>
             </div>
             <div class="nav-breadcrumb" id="missionBreadcrumb">Loading...</div>
         </div>
@@ -50,7 +50,6 @@
             <div class="tab-item active" data-tab="hosts">Hosts</div>
             <div class="tab-item" data-tab="subnets">Subnets</div>
             <div class="tab-item" data-tab="connections">Connections</div>
-            <div class="tab-item" data-tab="scans">Scan Control</div>
             <div class="tab-item" data-tab="intel">Threat Intel</div>
             <div class="tab-item" data-tab="hypotheses">Hunt Hypotheses</div>
         </div>
@@ -58,7 +57,6 @@
         <div id="tab-hosts" class="tab-panel"></div>
         <div id="tab-subnets" class="tab-panel" style="display:none;"></div>
         <div id="tab-connections" class="tab-panel" style="display:none;"></div>
-        <div id="tab-scans" class="tab-panel" style="display:none;"></div>
         <div id="tab-intel" class="tab-panel" style="display:none;"></div>
         <div id="tab-hypotheses" class="tab-panel" style="display:none;"></div>
     </main>
@@ -114,7 +112,6 @@
         await loadConnections();
         await loadIntel();
         await loadHypotheses();
-        await loadScans();
         initTabs();
     }
 
@@ -519,161 +516,6 @@
                 </div>
             </div>
         `).join('');
-    }
-
-    // ── Scan Control ──
-    async function loadScans() {
-        const scans = await fetchJSON(`/api/missions/${MISSION_ID}/scans`);
-        const statusColors = {running:'var(--accent-cyan)',completed:'var(--accent-green)',
-            failed:'var(--accent-red)',pending:'var(--text-muted)',cancelled:'var(--accent-amber)'};
-
-        let html = `
-        <div style="display:flex;gap:16px;margin-bottom:20px;">
-            <!-- Quick Scan Cards -->
-            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('full_active')">
-                <div class="panel-body" style="text-align:center;padding:20px;">
-                    <div style="font-size:24px;margin-bottom:8px;">🔍</div>
-                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Full Active Scan</div>
-                    <div style="font-size:11px;color:var(--text-muted);">Discovery → Ports → Services → OS → OT</div>
-                </div>
-            </div>
-            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('arp_sweep')">
-                <div class="panel-body" style="text-align:center;padding:20px;">
-                    <div style="font-size:24px;margin-bottom:8px;">📡</div>
-                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Host Discovery</div>
-                    <div style="font-size:11px;color:var(--text-muted);">ARP/ICMP sweep for live hosts</div>
-                </div>
-            </div>
-            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('port_scan')">
-                <div class="panel-body" style="text-align:center;padding:20px;">
-                    <div style="font-size:24px;margin-bottom:8px;">🔓</div>
-                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Port Scan</div>
-                    <div style="font-size:11px;color:var(--text-muted);">TCP/UDP port enumeration</div>
-                </div>
-            </div>
-            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('ot_scan')">
-                <div class="panel-body" style="text-align:center;padding:20px;">
-                    <div style="font-size:24px;margin-bottom:8px;">⚡</div>
-                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">OT/ICS Scan</div>
-                    <div style="font-size:11px;color:var(--text-muted);">Modbus, S7, DNP3, EtherNet/IP, BACnet</div>
-                </div>
-            </div>
-            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('passive_capture')">
-                <div class="panel-body" style="text-align:center;padding:20px;">
-                    <div style="font-size:24px;margin-bottom:8px;">👁️</div>
-                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Passive Capture</div>
-                    <div style="font-size:11px;color:var(--text-muted);">Zero-packet network observation</div>
-                </div>
-            </div>
-        </div>
-
-        <div style="display:flex;gap:8px;margin-bottom:20px;">
-            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('ad_enum')">
-                <div class="panel-body" style="text-align:center;padding:14px;">
-                    <div style="font-weight:600;font-size:12px;">🏛️ AD Enumeration</div>
-                </div>
-            </div>
-            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('smb_enum')">
-                <div class="panel-body" style="text-align:center;padding:14px;">
-                    <div style="font-weight:600;font-size:12px;">📁 SMB Enumeration</div>
-                </div>
-            </div>
-            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('snmp_enum')">
-                <div class="panel-body" style="text-align:center;padding:14px;">
-                    <div style="font-weight:600;font-size:12px;">📊 SNMP Enumeration</div>
-                </div>
-            </div>
-            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('service_scan')">
-                <div class="panel-body" style="text-align:center;padding:14px;">
-                    <div style="font-weight:600;font-size:12px;">🏷️ Service Detection</div>
-                </div>
-            </div>
-            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('host_profile')">
-                <div class="panel-body" style="text-align:center;padding:14px;">
-                    <div style="font-weight:600;font-size:12px;">🖥️ Host Profiling</div>
-                </div>
-            </div>
-        </div>`;
-
-        // Scan history table
-        if (scans.length > 0) {
-            html += `<div class="panel"><div class="panel-header"><div class="panel-title">Scan History</div></div>
-            <table class="data-table"><thead><tr>
-                <th>ID</th><th>Type</th><th>Target</th><th>Mode</th><th>Level</th><th>Status</th><th>Started</th><th>Actions</th>
-            </tr></thead><tbody>
-            ${scans.map(s => {
-                const color = statusColors[s.status] || 'var(--text-muted)';
-                return `<tr>
-                    <td>#${s.id}</td>
-                    <td style="color:var(--text-bright);">${s.job_type}</td>
-                    <td style="font-size:11px;">${s.target || '—'}</td>
-                    <td>${s.mode}</td>
-                    <td>${s.aggressiveness}/5</td>
-                    <td><span style="color:${color};font-weight:500;">${s.status.toUpperCase()}</span></td>
-                    <td style="font-size:11px;color:var(--text-muted);">${s.started_at || s.created_at || '—'}</td>
-                    <td>
-                        ${s.status === 'running' ? `<button class="btn btn-xs btn-danger" onclick="stopScan(${s.id})">Stop</button>` : ''}
-                        ${s.status === 'pending' ? `<button class="btn btn-xs btn-primary" onclick="startScan(${s.id})">Start</button>` : ''}
-                    </td>
-                </tr>`;
-            }).join('')}
-            </tbody></table></div>`;
-        }
-
-        document.getElementById('tab-scans').innerHTML = html;
-    }
-
-    async function launchScan(jobType) {
-        const target = prompt('Enter target (CIDR, IP range, or comma-separated IPs):', '');
-        if (target === null) return;
-
-        let aggressiveness = 3;
-        if (['port_scan','full_active','ot_scan'].includes(jobType)) {
-            const level = prompt('Aggressiveness level (1=ultra-safe, 3=normal, 5=full):', '3');
-            if (level === null) return;
-            aggressiveness = parseInt(level) || 3;
-        }
-
-        const config = {};
-        if (['ad_enum','smb_enum','host_profile'].includes(jobType)) {
-            const user = prompt('Username (leave blank for null session):','');
-            if (user) {
-                config.credentials = {
-                    username: user,
-                    password: prompt('Password:','') || '',
-                    domain: prompt('Domain:','') || ''
-                };
-            }
-        }
-        if (jobType === 'passive_capture') {
-            config.interface = prompt('Interface:', 'eth0') || 'eth0';
-            config.duration = parseInt(prompt('Duration (seconds):', '300')) || 300;
-        }
-
-        const res = await fetch(`/api/missions/${MISSION_ID}/scans`, {
-            method: 'POST',
-            headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({
-                job_type: jobType, target: target,
-                aggressiveness: aggressiveness, config: config, auto_start: true
-            })
-        });
-
-        if (res.ok) {
-            const result = await res.json();
-            alert(`Scan #${result.id} started! Check Scan History for progress.`);
-            loadScans();
-        }
-    }
-
-    async function stopScan(scanId) {
-        await fetch(`/api/scans/${scanId}/stop`, { method: 'POST' });
-        setTimeout(loadScans, 1000);
-    }
-
-    async function startScan(scanId) {
-        await fetch(`/api/scans/${scanId}/start`, { method: 'POST' });
-        setTimeout(loadScans, 1000);
     }
 
     // ── Export ──

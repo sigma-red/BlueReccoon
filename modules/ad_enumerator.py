@@ -3,7 +3,7 @@
 
 import re, json, logging
 from modules.base_scanner import BaseScanner
-logger = logging.getLogger('cpt-recon.ad')
+logger = logging.getLogger('blue-reccoon.ad')
 
 class ADEnumerator(BaseScanner):
     def run(self):

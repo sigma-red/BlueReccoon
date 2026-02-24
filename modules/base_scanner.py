@@ -10,7 +10,7 @@ import platform
 import subprocess
 import shutil
 
-logger = logging.getLogger('cpt-recon.scanner')
+logger = logging.getLogger('blue-reccoon.scanner')
 
 IS_WINDOWS = platform.system().lower() == 'windows'
 

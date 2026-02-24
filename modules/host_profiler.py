@@ -16,7 +16,7 @@ import json
 import logging
 from modules.base_scanner import BaseScanner
 
-logger = logging.getLogger('cpt-recon.profiler')
+logger = logging.getLogger('blue-reccoon.profiler')
 
 # Privileged group names for flagging
 PRIVILEGED_GROUPS = {

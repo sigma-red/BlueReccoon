@@ -8,7 +8,7 @@ import re
 import logging
 from modules.base_scanner import BaseScanner
 
-logger = logging.getLogger('cpt-recon.os')
+logger = logging.getLogger('blue-reccoon.os')
 
 
 class OSDetector(BaseScanner):

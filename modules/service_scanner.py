@@ -12,7 +12,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from modules.base_scanner import BaseScanner
 
-logger = logging.getLogger('cpt-recon.service')
+logger = logging.getLogger('blue-reccoon.service')
 
 # Protocol probes — bytes to send to elicit a response
 PROBES = {

@@ -2,7 +2,7 @@
 """Passive Capture - live traffic capture and analysis without sending packets."""
 import os, re, logging, time, subprocess, tempfile
 from modules.base_scanner import BaseScanner, IS_WINDOWS
-logger = logging.getLogger('cpt-recon.passive')
+logger = logging.getLogger('blue-reccoon.passive')
 
 class PassiveCapture(BaseScanner):
     def run(self):

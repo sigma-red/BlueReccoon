@@ -1,4 +1,4 @@
-# CPT RECON — Cyber Protection Team Reconnaissance & Baseline Platform
+# BLUE RECCOON — Blue Team Reconnaissance & Baseline Platform
 
 A mission-prep tool for Cyber Protection Teams operating on unfamiliar networks. Rapidly build a huntable baseline from zero knowledge of the target environment.
 
@@ -16,7 +16,7 @@ python app.py --host 0.0.0.0 --port 5000
 
 # Access the UI
 # Open http://localhost:5000
-# Default passphrase: cpt-recon-2024
+# Default passphrase: blue-reccoon-2024
 ```
 
 ## Running Modes
@@ -138,7 +138,7 @@ Click **"Load Demo Data"** on the dashboard to seed a realistic hybrid IT/OT ene
 ## Architecture
 
 ```
-cpt-recon/
+blue-reccoon/
 ├── app.py                          # Flask app, API routes, Socket.IO, DB schema
 ├── requirements.txt
 ├── modules/
@@ -205,8 +205,8 @@ Without these tools, the scanner falls back to native Python socket scanning, wh
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SECRET_KEY` | Random | Flask session secret |
-| `AUTH_HASH` | sha256('cpt-recon-2024') | SHA256 hash of auth passphrase |
-| `DB_PATH` | cpt_recon.db | SQLite database path |
+| `AUTH_HASH` | sha256('blue-reccoon-2024') | SHA256 hash of auth passphrase |
+| `DB_PATH` | blue_reccoon.db | SQLite database path |
 
 ## Custom Passphrase
 

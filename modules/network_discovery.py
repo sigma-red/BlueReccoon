@@ -12,7 +12,7 @@ import struct
 import time
 from modules.base_scanner import BaseScanner, IS_WINDOWS
 
-logger = logging.getLogger('cpt-recon.discovery')
+logger = logging.getLogger('blue-reccoon.discovery')
 
 
 class ARPScanner(BaseScanner):
