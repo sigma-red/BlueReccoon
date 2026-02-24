@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Service Scanner Module
-Banner grabbing, service version detection, and protocol identification.
-Grabs banners from open ports and identifies running services.
+Service version detection using nmap -sV as the primary method,
+with socket-based banner grabbing as fallback.
+Identifies running services, versions, and protocols on open ports.
 """
 
 import re
@@ -14,7 +15,7 @@ from modules.base_scanner import BaseScanner
 
 logger = logging.getLogger('blue-reccoon.service')
 
-# Protocol probes — bytes to send to elicit a response
+# Protocol probes — bytes to send to elicit a response (used in fallback mode)
 PROBES = {
     'http': b'GET / HTTP/1.0\r\nHost: target\r\n\r\n',
     'https': b'GET / HTTP/1.0\r\nHost: target\r\n\r\n',
@@ -50,18 +51,24 @@ PORT_HINTS = {
 
 
 class ServiceScanner(BaseScanner):
-    """Service version detection and banner grabbing."""
+    """Service version detection using nmap -sV with socket-based fallback."""
 
     def run(self):
         targets = self.parse_targets()
         if not targets:
             return {'error': 'No valid targets specified'}
 
+        use_nmap = self.tool_available('nmap')
+        method_desc = ("nmap -sV service version detection (primary), "
+                       "socket-based banner grabbing (fallback)" if use_nmap
+                       else "socket-based banner grabbing")
+
         self.log(f"Service detection scan initiated on {len(targets)} hosts. "
-                 f"Probes open ports discovered by Port Scan to identify running services. "
-                 f"Actions: TCP connect to each known open port, send protocol-specific probes "
+                 f"Method: {method_desc}. "
+                 f"Actions: {'nmap -sV probes for service fingerprinting; ' if use_nmap else ''}"
+                 f"TCP connect to open ports, protocol-specific probes "
                  f"(HTTP GET, SSH banner wait, SMB negotiate, RDP handshake, Modbus Device ID, etc.), "
-                 f"receive and fingerprint response banners. TLS certificate extraction on SSL ports. "
+                 f"banner fingerprinting. TLS certificate extraction on SSL ports. "
                  f"Updates service name, version, and banner fields for each port. "
                  f"All operations are read-only.",
                  severity='ACTION', category='config',
@@ -71,13 +78,11 @@ class ServiceScanner(BaseScanner):
         total_services = 0
         total_banners = 0
 
-        # Get all open services for targeted hosts
-        for ti, ip in enumerate(targets):
+        # Collect all host:port pairs to scan
+        host_ports = {}
+        for ip in targets:
             if self.is_stopped():
                 break
-
-            pct = int((ti / len(targets)) * 90)
-            self.progress(pct, f"Probing services on {ip}")
 
             host = db.execute(
                 "SELECT id FROM hosts WHERE mission_id = ? AND ip_address = ?",
@@ -96,25 +101,63 @@ class ServiceScanner(BaseScanner):
                 # If no services known yet, try common ports
                 services = [{'port': p, 'protocol': 'tcp'} for p in [22, 80, 443, 445, 3389]]
 
-            for svc in services:
+            host_ports[ip] = [(s['port'], s['protocol']) for s in services]
+
+        if use_nmap:
+            # ── Primary method: nmap -sV ──
+            nmap_results = self._nmap_service_scan(host_ports)
+
+            # Submit nmap results
+            for ip, port_results in nmap_results.items():
+                for port, result in port_results.items():
+                    total_services += 1
+                    if result.get('service_name') or result.get('service_version') or result.get('banner'):
+                        total_banners += 1
+                    # Resolve original protocol from host_ports
+                    proto = 'tcp'
+                    if ip in host_ports:
+                        for p, pr in host_ports[ip]:
+                            if p == port:
+                                proto = pr
+                                break
+                    self.submit_service(ip, port, proto, **result)
+
+            # Fallback: socket-based banner grabbing for ports nmap missed
+            self.progress(85, "Fallback banner grabbing for remaining services")
+            for ip, ports_list in host_ports.items():
+                if self.is_stopped():
+                    break
+                for port, proto in ports_list:
+                    if proto == 'udp':
+                        continue
+                    if ip in nmap_results and port in nmap_results[ip]:
+                        continue
+                    result = self._grab_banner(ip, port)
+                    if result:
+                        total_banners += 1
+                        self.submit_service(ip, port, proto, **result)
+                    total_services += 1
+        else:
+            # ── Fallback only: socket-based banner grabbing ──
+            host_list = list(host_ports.keys())
+            for ti, ip in enumerate(host_list):
                 if self.is_stopped():
                     break
 
-                port = svc['port']
-                proto = svc['protocol']
+                pct = int((ti / max(len(host_list), 1)) * 90)
+                self.progress(pct, f"Probing services on {ip}")
 
-                if proto == 'udp':
-                    continue  # Skip UDP for banner grabbing
+                for port, proto in host_ports[ip]:
+                    if self.is_stopped():
+                        break
+                    if proto == 'udp':
+                        continue
 
-                result = self._grab_banner(ip, port)
-                if result:
-                    total_banners += 1
-                    self.submit_service(
-                        ip, port, proto,
-                        **result
-                    )
-
-                total_services += 1
+                    result = self._grab_banner(ip, port)
+                    if result:
+                        total_banners += 1
+                        self.submit_service(ip, port, proto, **result)
+                    total_services += 1
 
         db.close()
 
@@ -124,8 +167,145 @@ class ServiceScanner(BaseScanner):
             'banners_grabbed': total_banners
         }
 
+    # ── nmap -sV primary method ──
+
+    def _nmap_service_scan(self, host_ports):
+        """Use nmap -sV for service version detection. Primary scanning method.
+
+        Args:
+            host_ports: dict mapping IP -> list of (port, protocol) tuples
+
+        Returns:
+            dict mapping IP -> {port: result_dict}
+        """
+        results = {}
+
+        # Collect all unique TCP ports and target IPs
+        all_ports = set()
+        all_ips = []
+        for ip, ports_list in host_ports.items():
+            all_ips.append(ip)
+            for port, proto in ports_list:
+                if proto != 'udp':
+                    all_ports.add(port)
+
+        if not all_ports or not all_ips:
+            return results
+
+        port_str = ','.join(str(p) for p in sorted(all_ports))
+
+        # Process hosts in chunks
+        chunk_size = 16
+        chunks = [all_ips[i:i + chunk_size] for i in range(0, len(all_ips), chunk_size)]
+
+        for ci, chunk in enumerate(chunks):
+            if self.is_stopped():
+                break
+
+            pct = int((ci / max(len(chunks), 1)) * 80)
+            self.progress(pct, f"nmap -sV scanning chunk {ci + 1}/{len(chunks)}")
+
+            target_str = ' '.join(chunk)
+            cmd = (
+                f"nmap -sV --version-intensity 5 "
+                f"-p {port_str} -oX - {target_str} 2>/dev/null"
+            )
+
+            self.log_send(
+                chunk[0], None, 'tcp',
+                f"nmap -sV service detection: {len(chunk)} hosts, "
+                f"{len(all_ports)} ports — version-intensity 5",
+                tool='nmap', command=cmd
+            )
+
+            # Scale timeout by number of hosts and ports
+            timeout = max(300, len(chunk) * len(all_ports) // 10)
+            rc, stdout, stderr = self.run_command(cmd, timeout=timeout)
+
+            if rc == 0 and stdout:
+                chunk_results = self._parse_nmap_service_output(stdout)
+                results.update(chunk_results)
+            else:
+                logger.warning(f"nmap -sV failed for chunk {ci + 1}: rc={rc}")
+
+        return results
+
+    def _parse_nmap_service_output(self, xml_output):
+        """Parse nmap -sV XML output for service versions.
+
+        Returns:
+            dict mapping IP -> {port: result_dict}
+        """
+        results = {}
+        host_blocks = re.findall(r'<host\b.*?</host>', xml_output, re.DOTALL)
+
+        for block in host_blocks:
+            if 'state="up"' not in block:
+                continue
+
+            ip_match = re.search(r'<address addr="([^"]+)" addrtype="ipv4"', block)
+            if not ip_match:
+                continue
+            ip = ip_match.group(1)
+            results[ip] = {}
+
+            port_blocks = re.findall(
+                r'<port protocol="(\w+)" portid="(\d+)">(.*?)</port>',
+                block, re.DOTALL
+            )
+
+            for proto, portid, port_content in port_blocks:
+                state_match = re.search(r'<state state="(\w+)"', port_content)
+                state = state_match.group(1) if state_match else 'unknown'
+
+                port = int(portid)
+                result = {'state': state}
+
+                # Parse service info from nmap -sV output
+                svc_match = re.search(r'<service\s+([^>]+)', port_content)
+                if svc_match:
+                    svc_attrs = svc_match.group(1)
+
+                    name_m = re.search(r'name="([^"]*)"', svc_attrs)
+                    product_m = re.search(r'product="([^"]*)"', svc_attrs)
+                    version_m = re.search(r'version="([^"]*)"', svc_attrs)
+                    extrainfo_m = re.search(r'extrainfo="([^"]*)"', svc_attrs)
+
+                    if name_m:
+                        result['service_name'] = name_m.group(1)
+
+                    # Build version string from product + version + extrainfo
+                    version_parts = []
+                    if product_m and product_m.group(1):
+                        version_parts.append(product_m.group(1))
+                    if version_m and version_m.group(1):
+                        version_parts.append(version_m.group(1))
+                    if extrainfo_m and extrainfo_m.group(1):
+                        version_parts.append(extrainfo_m.group(1))
+                    if version_parts:
+                        result['service_version'] = ' '.join(version_parts)
+
+                    # Use nmap version string as banner
+                    if version_parts:
+                        result['banner'] = ' '.join(version_parts)
+
+                # Check for OT protocol by port
+                ot_info = self.get_ot_info(port)
+                if ot_info:
+                    result['is_ot_protocol'] = 1
+                    result['ot_protocol_name'] = ot_info[0]
+                    if not result.get('service_name'):
+                        result['service_name'] = ot_info[1]
+
+                results[ip][port] = result
+
+        return results
+
+    # ── Socket-based fallback methods ──
+
     def _grab_banner(self, ip, port, timeout=3):
-        """Grab banner from a service. Returns dict with service info or None."""
+        """Grab banner from a service via socket. Fallback when nmap is unavailable.
+        Returns dict with service info or None."""
         protocol_hint = PORT_HINTS.get(port, 'unknown')
         use_ssl = port in (443, 636, 993, 995, 8443, 5986) or protocol_hint in ('https', 'ldaps', 'imaps', 'pop3s')
 
@@ -140,7 +320,7 @@ class ServiceScanner(BaseScanner):
             probe_desc = f'{protocol_hint} identification probe (read-only)'
 
         self.log_send(ip, port, 'tcp',
-                     f"Banner grab: {ip}:{port} — "
+                     f"Banner grab (fallback): {ip}:{port} — "
                      f"{'TLS handshake + ' if use_ssl else ''}{probe_desc}",
                      tool='socket')
 
