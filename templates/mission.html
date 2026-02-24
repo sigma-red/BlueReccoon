@@ -444,7 +444,7 @@
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12px;">
             <span style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:11px;">${label}</span>
             <select class="editable-select" data-field="${field}" data-host-id="${hostId}"
-                onchange="saveField('${field}', this.value, ${hostId}); ${field === 'criticality' ? 'this.className=\\'editable-select\\'' : ''}"
+                onchange="saveField('${field}', this.value, ${hostId})"
                 style="background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;padding:1px 4px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer;text-align:right;">
                 ${optionsHtml}
             </select>
