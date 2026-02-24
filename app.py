@@ -585,6 +585,15 @@ def add_service(host_id):
     db.commit()
     return jsonify({'id': cursor.lastrowid, 'status': 'created'}), 201
 
+@app.route('/api/services/<int:service_id>/notes', methods=['PUT'])
+@login_required
+def update_service_notes(service_id):
+    data = request.get_json()
+    db = get_db()
+    db.execute("UPDATE services SET notes = ? WHERE id = ?", (data.get('notes', ''), service_id))
+    db.commit()
+    return jsonify({'status': 'updated'})
+
 # ---------------------------------------------------------------------------
 # API - Host Profile Data (software, processes, tasks, groups)
 # ---------------------------------------------------------------------------

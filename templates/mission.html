@@ -209,7 +209,10 @@
     }
 
     // ── Host Detail ──
+    let currentHostId = null;
+
     async function showHostDetail(hostId) {
+        currentHostId = hostId;
         const data = await fetchJSON(`/api/hosts/${hostId}`);
         const h = data.host;
         const color = DEVICE_COLORS[h.device_type] || DEVICE_COLORS.unknown;
@@ -218,24 +221,33 @@
             <span class="device-icon" style="background:${color};width:10px;height:10px;"></span>
             ${h.hostname || h.ip_address}`;
 
+        const typeOptions = Object.entries(DEVICE_LABELS).map(([k,v]) =>
+            `<option value="${k}" ${h.device_type===k?'selected':''}>${v}</option>`).join('');
+        const critOptions = ['critical','high','medium','low'].map(c =>
+            `<option value="${c}" ${h.criticality===c?'selected':''}>${c}</option>`).join('');
+
         let html = `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
             <div class="panel" style="padding:14px;">
                 <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Network Info</div>
                 ${detailRow('IP Address', h.ip_address)}
-                ${detailRow('MAC Address', h.mac_address)}
-                ${detailRow('Hostname', h.hostname)}
-                ${detailRow('Domain', h.domain)}
+                ${editableRow('MAC Address', 'mac_address', h.mac_address, hostId)}
+                ${editableRow('Hostname', 'hostname', h.hostname, hostId)}
+                ${editableRow('Domain', 'domain', h.domain, hostId)}
                 ${detailRow('Subnet', h.subnet_id)}
             </div>
             <div class="panel" style="padding:14px;">
-                <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Device Info</div>
-                ${detailRow('OS', h.os_name ? `${h.os_name} ${h.os_version||''}` : null)}
-                ${detailRow('Type', DEVICE_LABELS[h.device_type]||h.device_type)}
-                ${detailRow('Vendor', h.device_vendor)}
-                ${detailRow('Model', h.device_model)}
-                ${detailRow('Firmware', h.firmware_version)}
-                ${detailRow('Criticality', `<span class="crit-badge crit-${h.criticality}">${h.criticality}</span>`)}
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">Device Info</div>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--accent-cyan);opacity:0.6;">CLICK VALUES TO EDIT</span>
+                </div>
+                ${editableRow('OS Name', 'os_name', h.os_name, hostId)}
+                ${editableRow('OS Version', 'os_version', h.os_version, hostId)}
+                ${editableSelectRow('Type', 'device_type', typeOptions, hostId)}
+                ${editableRow('Vendor', 'device_vendor', h.device_vendor, hostId)}
+                ${editableRow('Model', 'device_model', h.device_model, hostId)}
+                ${editableRow('Firmware', 'firmware_version', h.firmware_version, hostId)}
+                ${editableSelectRow('Criticality', 'criticality', critOptions, hostId)}
             </div>
         </div>`;
 
@@ -245,13 +257,14 @@
                 <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">
                     Open Services (${data.services.length})
                 </div>
-                <table class="data-table"><thead><tr><th>Port</th><th>Proto</th><th>Service</th><th>Version</th><th>OT</th></tr></thead><tbody>
+                <table class="data-table"><thead><tr><th>Port</th><th>Proto</th><th>Service</th><th>Version</th><th>OT</th><th>Notes</th></tr></thead><tbody>
                 ${data.services.map(s => `<tr>
                     <td style="color:var(--accent-cyan);font-weight:500;">${s.port}</td>
                     <td>${s.protocol}</td>
                     <td>${s.service_name || '—'}</td>
                     <td style="font-size:11px;">${s.service_version || '—'}</td>
                     <td>${s.is_ot_protocol ? `<span class="badge badge-red">${s.ot_protocol_name}</span>` : ''}</td>
+                    <td class="svc-note-cell" data-service-id="${s.id}" onclick="editServiceNote(this, ${s.id})" style="font-size:11px;color:var(--text-secondary);cursor:pointer;min-width:120px;" title="Click to add/edit note">${s.notes ? escapeHtml(s.notes) : '<span style="color:var(--text-muted);font-style:italic;font-size:10px;">+ add note</span>'}</td>
                 </tr>`).join('')}
                 </tbody></table>
             </div>`;
@@ -411,6 +424,100 @@
             <span style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:11px;">${label}</span>
             <span style="color:var(--text-primary);">${value || '<span style="color:var(--text-muted)">—</span>'}</span>
         </div>`;
+    }
+
+    function editableRow(label, field, value, hostId) {
+        const escaped = value ? escapeHtml(value) : '';
+        const display = escaped || '<span style="color:var(--text-muted)">—</span>';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12px;">
+            <span style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:11px;">${label}</span>
+            <span class="editable-value" data-field="${field}" data-host-id="${hostId}"
+                onclick="startEditField(this, '${field}', ${hostId})"
+                style="color:var(--text-primary);cursor:pointer;padding:1px 6px;border-radius:3px;border:1px solid transparent;max-width:180px;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                title="Click to edit"
+                onmouseenter="this.style.borderColor='var(--border-hover)'"
+                onmouseleave="this.style.borderColor='transparent'">${display}</span>
+        </div>`;
+    }
+
+    function editableSelectRow(label, field, optionsHtml, hostId) {
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12px;">
+            <span style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:11px;">${label}</span>
+            <select class="editable-select" data-field="${field}" data-host-id="${hostId}"
+                onchange="saveField('${field}', this.value, ${hostId}); ${field === 'criticality' ? 'this.className=\\'editable-select\\'' : ''}"
+                style="background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;padding:1px 4px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer;text-align:right;">
+                ${optionsHtml}
+            </select>
+        </div>`;
+    }
+
+    function startEditField(el, field, hostId) {
+        if (el.querySelector('input')) return;
+        const currentVal = el.textContent === '—' ? '' : el.textContent.trim();
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentVal;
+        input.style.cssText = 'background:var(--bg-primary);color:var(--text-bright);border:1px solid var(--accent-cyan);border-radius:3px;padding:2px 6px;font-size:11px;font-family:JetBrains Mono,monospace;width:100%;outline:none;';
+        input.onkeydown = (e) => {
+            if (e.key === 'Enter') { input.blur(); }
+            if (e.key === 'Escape') { showHostDetail(hostId); }
+        };
+        input.onblur = () => {
+            const newVal = input.value.trim();
+            saveField(field, newVal, hostId);
+            el.innerHTML = newVal ? escapeHtml(newVal) : '<span style="color:var(--text-muted)">—</span>';
+            el.style.borderColor = 'transparent';
+        };
+        el.innerHTML = '';
+        el.appendChild(input);
+        el.style.borderColor = 'var(--accent-cyan)';
+        input.focus();
+        input.select();
+    }
+
+    async function saveField(field, value, hostId) {
+        const body = {};
+        body[field] = value || null;
+        await fetch(`/api/hosts/${hostId}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        // Refresh host list to reflect changes
+        await loadHosts();
+    }
+
+    function editServiceNote(cell, serviceId) {
+        if (cell.querySelector('input')) return;
+        const currentNote = cell.textContent.includes('add note') ? '' : cell.textContent.trim();
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentNote;
+        input.placeholder = 'Enter note...';
+        input.style.cssText = 'background:var(--bg-primary);color:var(--text-bright);border:1px solid var(--accent-cyan);border-radius:3px;padding:2px 6px;font-size:11px;font-family:JetBrains Mono,monospace;width:100%;outline:none;';
+        input.onkeydown = (e) => {
+            if (e.key === 'Enter') { input.blur(); }
+            if (e.key === 'Escape') { showHostDetail(currentHostId); }
+        };
+        input.onblur = async () => {
+            const note = input.value.trim();
+            await fetch(`/api/services/${serviceId}/notes`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({notes: note})
+            });
+            cell.innerHTML = note ? escapeHtml(note) : '<span style="color:var(--text-muted);font-style:italic;font-size:10px;">+ add note</span>';
+        };
+        cell.innerHTML = '';
+        cell.appendChild(input);
+        input.focus();
+        input.select();
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     // ── Subnets ──
