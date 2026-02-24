@@ -40,20 +40,10 @@ def get_scan_engine():
     """Lazy-initialize the scan engine."""
     global scan_engine
     if scan_engine is None:
-        from modules.scan_engine import ScanEngine
-        scan_engine = ScanEngine(app.config['DATABASE'], socketio)
-    return scan_engine
-
-# Scan engine (initialized after app start)
-scan_engine = None
-
-# Scan engine (initialized after app setup)
-scan_engine = None
-
-def get_scan_engine():
-    global scan_engine
-    if scan_engine is None:
         scan_engine = app.config.get('SCAN_ENGINE')
+        if scan_engine is None:
+            from modules.scan_engine import ScanEngine
+            scan_engine = ScanEngine(app.config['DATABASE'], socketio)
     return scan_engine
 
 # ---------------------------------------------------------------------------
@@ -476,6 +466,36 @@ def update_mission(mission_id):
     )
     db.commit()
     return jsonify({'status': 'updated'})
+
+@app.route('/api/missions/<int:mission_id>', methods=['DELETE'])
+@login_required
+def delete_mission(mission_id):
+    db = get_db()
+    mission = db.execute("SELECT id FROM missions WHERE id = ?", (mission_id,)).fetchone()
+    if not mission:
+        return jsonify({'error': 'Mission not found'}), 404
+    # Cascade delete all related data
+    host_ids = [r['id'] for r in db.execute("SELECT id FROM hosts WHERE mission_id = ?", (mission_id,)).fetchall()]
+    for hid in host_ids:
+        db.execute("DELETE FROM services WHERE host_id = ?", (hid,))
+        db.execute("DELETE FROM ot_devices WHERE host_id = ?", (hid,))
+        db.execute("DELETE FROM software_inventory WHERE host_id = ?", (hid,))
+        db.execute("DELETE FROM running_processes WHERE host_id = ?", (hid,))
+        db.execute("DELETE FROM scheduled_tasks WHERE host_id = ?", (hid,))
+        db.execute("DELETE FROM local_groups WHERE host_id = ?", (hid,))
+    db.execute("DELETE FROM hosts WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM subnets WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM connections WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM domain_info WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM privileged_accounts WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM threat_intel WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM hunt_hypotheses WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM scan_activity_log WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM scan_jobs WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM audit_log WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM missions WHERE id = ?", (mission_id,))
+    db.commit()
+    return jsonify({'status': 'deleted'})
 
 # ---------------------------------------------------------------------------
 # API - Hosts

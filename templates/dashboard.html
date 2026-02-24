@@ -147,7 +147,12 @@
                 <div class="mission-card" onclick="window.location='/mission/${m.id}'">
                     <div class="mission-card-header">
                         <div class="mission-type-badge ${typeClass}">${m.network_type}</div>
-                        <div class="mission-status status-${m.status}">${m.status}</div>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <div class="mission-status status-${m.status}">${m.status}</div>
+                            <button class="btn-icon-delete" onclick="event.stopPropagation(); deleteMission(${m.id}, '${m.name.replace(/'/g, "\\'")}')" title="Delete mission">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                            </button>
+                        </div>
                     </div>
                     <h3 class="mission-name">${m.name}</h3>
                     <p class="mission-desc">${m.description || 'No description'}</p>
@@ -201,6 +206,17 @@
             if (res.ok) {
                 const result = await res.json();
                 window.location = `/mission/${result.mission_id}`;
+            }
+        }
+
+        // ── Delete mission ──
+        async function deleteMission(id, name) {
+            if (!confirm(`Delete mission "${name}"?\n\nThis will permanently remove all hosts, subnets, connections, scans, and related data. This cannot be undone.`)) return;
+            const res = await fetch(`/api/missions/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                loadMissions();
+            } else {
+                alert('Failed to delete mission');
             }
         }
 
