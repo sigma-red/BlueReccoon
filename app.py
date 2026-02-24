@@ -220,6 +220,73 @@ def init_db():
         FOREIGN KEY (host_id) REFERENCES hosts(id)
     );
 
+    -- Installed software inventory (per host)
+    CREATE TABLE IF NOT EXISTS software_inventory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        version TEXT,
+        publisher TEXT,
+        install_date TEXT,
+        install_source TEXT,  -- wmi, registry, dpkg, rpm, snap
+        architecture TEXT,    -- x64, x86, arm64
+        collected_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (host_id) REFERENCES hosts(id)
+    );
+
+    -- Running processes and services baseline (per host)
+    CREATE TABLE IF NOT EXISTS running_processes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id INTEGER NOT NULL,
+        pid INTEGER,
+        name TEXT NOT NULL,
+        exe_path TEXT,
+        command_line TEXT,
+        username TEXT,
+        parent_pid INTEGER,
+        is_service INTEGER DEFAULT 0,
+        service_name TEXT,        -- Windows service name or systemd unit
+        service_display_name TEXT,
+        service_state TEXT,       -- running, stopped, auto, manual
+        start_type TEXT,          -- auto, manual, disabled, demand
+        memory_bytes INTEGER,
+        cpu_percent REAL,
+        collected_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (host_id) REFERENCES hosts(id)
+    );
+
+    -- Scheduled tasks (per host)
+    CREATE TABLE IF NOT EXISTS scheduled_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id INTEGER NOT NULL,
+        task_name TEXT NOT NULL,
+        task_path TEXT,
+        status TEXT,              -- Ready, Running, Disabled
+        next_run TEXT,
+        last_run TEXT,
+        last_result TEXT,
+        author TEXT,
+        run_as_user TEXT,
+        command TEXT,             -- action/command to execute
+        trigger_info TEXT,        -- schedule description
+        source TEXT,              -- schtasks, cron, systemd-timer
+        collected_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (host_id) REFERENCES hosts(id)
+    );
+
+    -- Local and domain group memberships (per host)
+    CREATE TABLE IF NOT EXISTS local_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id INTEGER NOT NULL,
+        group_name TEXT NOT NULL,
+        group_type TEXT,          -- local, domain
+        members TEXT,             -- JSON array of member names
+        description TEXT,
+        is_privileged INTEGER DEFAULT 0,
+        collected_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (host_id) REFERENCES hosts(id)
+    );
+
     -- Scan/discovery jobs
     CREATE TABLE IF NOT EXISTS scan_jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -458,11 +525,21 @@ def get_host_detail(host_id):
         SELECT * FROM connections WHERE src_host_id = ? OR dst_host_id = ? ORDER BY last_seen DESC LIMIT 100
     """, (host_id, host_id)).fetchall()
     ot_device = db.execute("SELECT * FROM ot_devices WHERE host_id = ?", (host_id,)).fetchone()
+    software = db.execute("SELECT * FROM software_inventory WHERE host_id = ? ORDER BY name", (host_id,)).fetchall()
+    processes = db.execute("SELECT * FROM running_processes WHERE host_id = ? AND is_service = 0 ORDER BY name", (host_id,)).fetchall()
+    host_services = db.execute("SELECT * FROM running_processes WHERE host_id = ? AND is_service = 1 ORDER BY service_name", (host_id,)).fetchall()
+    tasks = db.execute("SELECT * FROM scheduled_tasks WHERE host_id = ? ORDER BY task_name", (host_id,)).fetchall()
+    groups = db.execute("SELECT * FROM local_groups WHERE host_id = ? ORDER BY is_privileged DESC, group_name", (host_id,)).fetchall()
     return jsonify({
         'host': dict(host),
         'services': [dict(s) for s in services],
         'connections': [dict(c) for c in connections],
-        'ot_device': dict(ot_device) if ot_device else None
+        'ot_device': dict(ot_device) if ot_device else None,
+        'software': [dict(s) for s in software],
+        'processes': [dict(p) for p in processes],
+        'host_services': [dict(s) for s in host_services],
+        'scheduled_tasks': [dict(t) for t in tasks],
+        'local_groups': [dict(g) for g in groups],
     })
 
 @app.route('/api/hosts/<int:host_id>', methods=['PUT'])
@@ -507,6 +584,44 @@ def add_service(host_id):
           data.get('is_ot_protocol', 0), data.get('ot_protocol_name'), data.get('notes')))
     db.commit()
     return jsonify({'id': cursor.lastrowid, 'status': 'created'}), 201
+
+# ---------------------------------------------------------------------------
+# API - Host Profile Data (software, processes, tasks, groups)
+# ---------------------------------------------------------------------------
+@app.route('/api/hosts/<int:host_id>/software', methods=['GET'])
+@login_required
+def get_host_software(host_id):
+    db = get_db()
+    rows = db.execute("SELECT * FROM software_inventory WHERE host_id = ? ORDER BY name", (host_id,)).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/hosts/<int:host_id>/processes', methods=['GET'])
+@login_required
+def get_host_processes(host_id):
+    db = get_db()
+    rows = db.execute("SELECT * FROM running_processes WHERE host_id = ? AND is_service = 0 ORDER BY name", (host_id,)).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/hosts/<int:host_id>/host_services', methods=['GET'])
+@login_required
+def get_host_services(host_id):
+    db = get_db()
+    rows = db.execute("SELECT * FROM running_processes WHERE host_id = ? AND is_service = 1 ORDER BY service_name", (host_id,)).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/hosts/<int:host_id>/tasks', methods=['GET'])
+@login_required
+def get_host_tasks(host_id):
+    db = get_db()
+    rows = db.execute("SELECT * FROM scheduled_tasks WHERE host_id = ? ORDER BY task_name", (host_id,)).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/hosts/<int:host_id>/groups', methods=['GET'])
+@login_required
+def get_host_groups(host_id):
+    db = get_db()
+    rows = db.execute("SELECT * FROM local_groups WHERE host_id = ? ORDER BY is_privileged DESC, group_name", (host_id,)).fetchall()
+    return jsonify([dict(r) for r in rows])
 
 # ---------------------------------------------------------------------------
 # API - Subnets
@@ -932,6 +1047,14 @@ def get_mission_stats(mission_id):
         'scans': {
             'total': db.execute("SELECT COUNT(*) FROM scan_jobs WHERE mission_id = ?", (mission_id,)).fetchone()[0],
             'running': db.execute("SELECT COUNT(*) FROM scan_jobs WHERE mission_id = ? AND status = 'running'", (mission_id,)).fetchone()[0],
+        },
+        'profile': {
+            'software': db.execute("SELECT COUNT(*) FROM software_inventory si JOIN hosts h ON si.host_id = h.id WHERE h.mission_id = ?", (mission_id,)).fetchone()[0],
+            'processes': db.execute("SELECT COUNT(*) FROM running_processes rp JOIN hosts h ON rp.host_id = h.id WHERE h.mission_id = ? AND rp.is_service = 0", (mission_id,)).fetchone()[0],
+            'services_baselined': db.execute("SELECT COUNT(*) FROM running_processes rp JOIN hosts h ON rp.host_id = h.id WHERE h.mission_id = ? AND rp.is_service = 1", (mission_id,)).fetchone()[0],
+            'tasks': db.execute("SELECT COUNT(*) FROM scheduled_tasks st JOIN hosts h ON st.host_id = h.id WHERE h.mission_id = ?", (mission_id,)).fetchone()[0],
+            'groups': db.execute("SELECT COUNT(*) FROM local_groups lg JOIN hosts h ON lg.host_id = h.id WHERE h.mission_id = ?", (mission_id,)).fetchone()[0],
+            'hosts_profiled': db.execute("SELECT COUNT(DISTINCT si.host_id) FROM software_inventory si JOIN hosts h ON si.host_id = h.id WHERE h.mission_id = ?", (mission_id,)).fetchone()[0],
         }
     }
 
@@ -968,6 +1091,18 @@ def export_mission(mission_id):
         'domain_info': [dict(d) for d in db.execute("SELECT * FROM domain_info WHERE mission_id = ?", (mission_id,)).fetchall()],
         'threat_intel': [dict(t) for t in db.execute("SELECT * FROM threat_intel WHERE mission_id = ?", (mission_id,)).fetchall()],
         'hypotheses': [dict(h) for h in db.execute("SELECT * FROM hunt_hypotheses WHERE mission_id = ?", (mission_id,)).fetchall()],
+        'software_inventory': [dict(s) for s in db.execute("""
+            SELECT si.* FROM software_inventory si JOIN hosts h ON si.host_id = h.id WHERE h.mission_id = ?
+        """, (mission_id,)).fetchall()],
+        'running_processes': [dict(p) for p in db.execute("""
+            SELECT rp.* FROM running_processes rp JOIN hosts h ON rp.host_id = h.id WHERE h.mission_id = ?
+        """, (mission_id,)).fetchall()],
+        'scheduled_tasks': [dict(t) for t in db.execute("""
+            SELECT st.* FROM scheduled_tasks st JOIN hosts h ON st.host_id = h.id WHERE h.mission_id = ?
+        """, (mission_id,)).fetchall()],
+        'local_groups': [dict(g) for g in db.execute("""
+            SELECT lg.* FROM local_groups lg JOIN hosts h ON lg.host_id = h.id WHERE h.mission_id = ?
+        """, (mission_id,)).fetchall()],
         'exported_at': datetime.now(timezone.utc).isoformat()
     }
     return jsonify(export_data)
