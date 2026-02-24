@@ -12,7 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from modules.base_scanner import BaseScanner
 
-logger = logging.getLogger('cpt-recon.portscan')
+logger = logging.getLogger('blue-reccoon.portscan')
 
 # Port profiles by aggressiveness
 PORT_PROFILES = {

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CPT RECON // Scan Control</title>
+    <title>BLUE RECCOON // Scan Control</title>
     <link rel="stylesheet" href="/static/css/main.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <style>
@@ -268,7 +268,7 @@
         <div class="nav-left">
             <div class="nav-logo">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#0ea5e9" stroke-width="1.5"><circle cx="12" cy="12" r="10" opacity="0.4"/><circle cx="12" cy="12" r="3"/></svg>
-                <a href="/" style="text-decoration:none;"><span class="nav-title">CPT RECON</span></a>
+                <a href="/" style="text-decoration:none;"><span class="nav-title">BLUE RECCOON</span></a>
             </div>
             <a href="/mission/{{ mission_id }}" style="text-decoration:none;"><div class="nav-breadcrumb">← Back to Mission</div></a>
         </div>
@@ -980,7 +980,7 @@
         const entries = scanLogs[scanId] || [];
         if (entries.length === 0) return showToast('No log entries to copy');
         const scan = knownScans.find(s => s.id === scanId);
-        const header = `CPT RECON — ACTIONS ON NETWORK LOG\nScan #${scanId}: ${TYPE_LABELS[scan?.job_type]||'Unknown'}\nTarget: ${scan?.target||'N/A'}\nOperator: ${scan?.created_by||'unknown'}\nCopied: ${new Date().toISOString()}\nEntries: ${entries.length}`;
+        const header = `BLUE RECCOON — ACTIONS ON NETWORK LOG\nScan #${scanId}: ${TYPE_LABELS[scan?.job_type]||'Unknown'}\nTarget: ${scan?.target||'N/A'}\nOperator: ${scan?.created_by||'unknown'}\nCopied: ${new Date().toISOString()}\nEntries: ${entries.length}`;
         navigator.clipboard.writeText(formatLogEntries(entries, header)).then(() => showToast('Log copied to clipboard'));
     }
 

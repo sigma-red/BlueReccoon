@@ -2,7 +2,7 @@
 """SNMP Enumerator - community string testing and device info."""
 import re, logging
 from modules.base_scanner import BaseScanner
-logger = logging.getLogger('cpt-recon.snmp')
+logger = logging.getLogger('blue-reccoon.snmp')
 DEFAULT_COMMUNITIES = ['public','private','community','snmp','monitor','admin','default']
 
 class SNMPEnumerator(BaseScanner):

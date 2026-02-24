@@ -2,7 +2,7 @@
 """PCAP Importer - import and analyze existing PCAP files."""
 import os, re, logging
 from modules.base_scanner import BaseScanner, IS_WINDOWS
-logger = logging.getLogger('cpt-recon.pcap')
+logger = logging.getLogger('blue-reccoon.pcap')
 
 class PCAPImporter(BaseScanner):
     def run(self):

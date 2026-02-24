@@ -15,7 +15,7 @@ import logging
 import time
 from modules.base_scanner import BaseScanner
 
-logger = logging.getLogger('cpt-recon.ot')
+logger = logging.getLogger('blue-reccoon.ot')
 
 # Aggressiveness rate limits (seconds between probes per host)
 OT_RATE_LIMITS = {

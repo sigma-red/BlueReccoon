@@ -2,7 +2,7 @@
 """Full Active Scan - orchestrates all active enumeration modules sequentially."""
 import logging
 from modules.base_scanner import BaseScanner
-logger = logging.getLogger('cpt-recon.fullscan')
+logger = logging.getLogger('blue-reccoon.fullscan')
 
 class FullActiveScan(BaseScanner):
     def __init__(self, engine, scan_id, mission_id, target, config, stop_flag, aggressiveness=3):

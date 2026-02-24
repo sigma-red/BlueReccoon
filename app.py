@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CPT Recon - Cyber Protection Team Reconnaissance & Baseline Tool
+Blue Reccoon - Blue Team Reconnaissance & Baseline Tool
 A mission-prep platform for threat hunters operating on unfamiliar networks.
 Supports standalone (single operator) and team server (multi-analyst) modes.
 """
@@ -24,14 +24,14 @@ from flask_socketio import SocketIO, emit, join_room
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
-app.config['DATABASE'] = os.environ.get('DB_PATH', 'cpt_recon.db')
+app.config['DATABASE'] = os.environ.get('DB_PATH', 'blue_reccoon.db')
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024  # 64MB
 
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('cpt-recon')
+logger = logging.getLogger('blue-reccoon')
 
 # Scan engine (initialized after DB)
 scan_engine = None
@@ -390,7 +390,7 @@ def login():
         # Simple passphrase-based auth for field deployment
         passphrase = request.form.get('passphrase', '')
         operator = request.form.get('operator', 'Operator')
-        stored_hash = os.environ.get('AUTH_HASH', hashlib.sha256(b'cpt-recon-2024').hexdigest())
+        stored_hash = os.environ.get('AUTH_HASH', hashlib.sha256(b'blue-reccoon-2024').hexdigest())
         if hashlib.sha256(passphrase.encode()).hexdigest() == stored_hash:
             session['authenticated'] = True
             session['operator'] = operator
@@ -913,7 +913,7 @@ def export_activity_log(mission_id):
 
     lines = []
     lines.append("=" * 80)
-    lines.append(f"CPT RECON — ACTIONS ON NETWORK LOG")
+    lines.append(f"BLUE RECCOON — ACTIONS ON NETWORK LOG")
     lines.append(f"Mission: {mission['name'] if mission else 'Unknown'}")
     lines.append(f"Exported: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
     lines.append(f"Total Entries: {len(rows)}")
@@ -1373,7 +1373,7 @@ def log_audit(db, mission_id, action, details):
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser(description='CPT Recon - Cyber Protection Team Reconnaissance Tool')
+    parser = argparse.ArgumentParser(description='Blue Reccoon - Blue Team Reconnaissance & Baseline Tool')
     parser.add_argument('--host', default='0.0.0.0', help='Bind address (0.0.0.0 for team server, 127.0.0.1 for standalone)')
     parser.add_argument('--port', type=int, default=5000, help='Port number')
     parser.add_argument('--standalone', action='store_true', help='Run in standalone mode (localhost only)')
@@ -1391,5 +1391,5 @@ if __name__ == '__main__':
     logger.info("Scan engine initialized")
 
     bind_host = '127.0.0.1' if args.standalone else args.host
-    logger.info(f"CPT Recon starting in {'standalone' if args.standalone else 'team server'} mode on {bind_host}:{args.port}")
+    logger.info(f"Blue Reccoon starting in {'standalone' if args.standalone else 'team server'} mode on {bind_host}:{args.port}")
     socketio.run(app, host=bind_host, port=args.port, debug=args.debug, allow_unsafe_werkzeug=True)
