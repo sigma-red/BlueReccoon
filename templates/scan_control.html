@@ -381,35 +381,33 @@
             }
         },
         port_scan: {
-            name: 'Port Scan', brief: 'TCP/UDP port scanning with configurable scope', mode: 'active',
+            name: 'Port Scan', brief: 'Discover open ports on target hosts (fast SYN scan)', mode: 'active',
             detail: {
-                summary: 'Scans target hosts for open TCP (and optionally UDP) ports. Aggressiveness controls port count.',
+                summary: 'Quick port-only scan — identifies which ports are open or closed on target hosts. Does NOT probe service versions. Run Service Detection after this to identify what is running on each port.',
                 network_actions: [
                     'Sends <code>TCP SYN</code> packets to each port on each target (half-open scan via nmap)',
-                    'Nmap: <code>nmap -sS -sV -O -T[1-4]</code> — SYN scan + service version + OS detection',
-                    'Service version detection (<code>-sV</code>) sends protocol probes to open ports',
-                    'OS fingerprinting (<code>-O</code>) sends crafted TCP/ICMP packets to analyze stack',
+                    'Nmap: <code>nmap -sS -T[1-4]</code> — SYN scan only, no version probing',
                     'Without nmap: full <code>TCP connect()</code> — completes 3-way handshake per port',
                     'If UDP enabled: <code>UDP datagrams</code> to common service ports (53, 161, 500, etc.)',
                 ],
                 tools_used: 'nmap (preferred) or Python socket TCP connect scan',
                 ports_touched: 'L1: ~100+OT | L2: ~200+OT | L3: 1-1024+OT | L4: 1-5000+OT | L5: 1-65535. OT ports (102,502,2222,4840,20000,44818,47808) always included.',
-                protocols: 'TCP SYN, TCP connect, UDP (optional), ICMP (OS detection)',
+                protocols: 'TCP SYN, TCP connect, UDP (optional)',
                 risk: 'Moderate. Significant traffic. SYN scans trigger IDS. L5 on large subnets is very noisy.',
             }
         },
         service_scan: {
-            name: 'Service Detection', brief: 'Banner grabbing and version fingerprinting on open ports', mode: 'active',
+            name: 'Service Detection', brief: 'Identify services, versions, and banners on open ports', mode: 'active',
             detail: {
-                summary: 'Connects to known open ports and identifies running services via protocol probes and banner analysis.',
+                summary: 'Deep-probes open ports found by Port Scan to identify running services, version info, and banners. Updates the Service Name, Version, and Notes columns in the host detail view.',
                 network_actions: [
-                    '<code>TCP connect</code> to each open port from prior scans',
+                    '<code>TCP connect</code> to each open port from Port Scan results',
                     'Protocol probes: <code>HTTP GET /</code>, SSH banner wait, <code>SMB Negotiate</code>, <code>RDP X.224</code>, etc.',
                     'TLS ports: <code>TLS handshake</code> + server certificate extraction (subject, SAN, issuer)',
                     'OT ports: read-only identification probes (Modbus FC43, S7comm COTP, etc.)',
                 ],
                 tools_used: 'Python socket with protocol-specific probe library',
-                ports_touched: 'Only ports previously identified as open',
+                ports_touched: 'Only ports previously identified as open by Port Scan',
                 protocols: 'TCP (HTTP, SSH, SMB, RDP, FTP, SMTP, LDAP, TLS, etc.)',
                 risk: 'Low-moderate. Connects to already-known ports. Brief connections. Standard client behavior.',
             }

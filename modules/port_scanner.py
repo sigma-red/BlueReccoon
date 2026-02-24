@@ -75,10 +75,11 @@ class PortScanner(BaseScanner):
         use_nmap = self.tool_available('nmap') and self.aggressiveness >= 2
         self.log(f"Port scan initiated: {len(targets)} hosts × {len(ports)} ports = {total_work} total probes. "
                  f"Aggressiveness: L{self.aggressiveness} — {aggr_desc.get(self.aggressiveness,'')}. "
-                 f"Tool: {'nmap SYN scan (-sS -sV -O)' if use_nmap else 'TCP connect scan (socket)'}. "
+                 f"Tool: {'nmap SYN scan (-sS)' if use_nmap else 'TCP connect scan (socket)'}. "
                  f"UDP scan: {'YES' if self.scan_udp else 'NO'}. "
                  f"Actions: TCP SYN packets to each port on each target. "
-                 f"Nmap will also attempt service version detection (-sV) and OS fingerprinting (-O).",
+                 f"Port-only scan — identifies open/closed ports. "
+                 f"Run Service Detection scan after this to identify service versions and banners.",
                  severity='ACTION', category='config',
                  raw_detail=f"Targets: {self.target} | OT ports always included: {','.join(str(p) for p in OT_PORTS)}")
 
@@ -110,7 +111,7 @@ class PortScanner(BaseScanner):
         return self.results_summary
 
     def _nmap_scan(self, targets, ports):
-        """Use nmap for port scanning."""
+        """Use nmap for port scanning. SYN scan only — no version probing."""
         results = {}
         chunk_size = 32  # Hosts per nmap invocation
         chunks = [targets[i:i+chunk_size] for i in range(0, len(targets), chunk_size)]
@@ -135,17 +136,15 @@ class PortScanner(BaseScanner):
 
             target_str = ' '.join(chunk)
             cmd = (
-                f"nmap -sS -sV --version-intensity {min(5, self.aggressiveness)} "
+                f"nmap -sS "
                 f"-T{timing} -p {port_str} "
                 f"--min-rate={100 * self.aggressiveness} "
-                f"-O --osscan-guess "
                 f"-oX - {target_str} 2>/dev/null"
             )
-            # Scale timeout by aggressiveness and host count: L5 full-port scans need much longer
-            nmap_timeout = {1: 300, 2: 300, 3: 600, 4: 900, 5: 1800}.get(self.aggressiveness, 600)
-            # Add extra time for large target sets (30s per host at L5)
+            # Scale timeout by aggressiveness and host count
+            nmap_timeout = {1: 120, 2: 180, 3: 300, 4: 600, 5: 1200}.get(self.aggressiveness, 300)
             if self.aggressiveness >= 4:
-                nmap_timeout += len(chunk) * 30
+                nmap_timeout += len(chunk) * 15
             rc, stdout, stderr = self.run_command(cmd, timeout=nmap_timeout)
 
             if rc == 0 and stdout:
@@ -155,7 +154,7 @@ class PortScanner(BaseScanner):
         return results
 
     def _parse_nmap_output(self, xml_output):
-        """Parse nmap XML output for open ports, services, and OS detection."""
+        """Parse nmap XML output for open ports. Port-only scan — no version/OS data."""
         results = {}
         host_blocks = re.findall(r'<host\b.*?</host>', xml_output, re.DOTALL)
 
@@ -173,30 +172,13 @@ class PortScanner(BaseScanner):
             mac = mac_match.group(1) if mac_match else None
             vendor = vendor_match.group(1) if vendor_match else None
 
-            # OS detection
-            os_match = re.search(r'<osmatch name="([^"]+)".*?accuracy="(\d+)"', block)
-            os_name = None
-            if os_match and int(os_match.group(2)) > 80:
-                os_name = os_match.group(1)
-
-            # Hostname
+            # Hostname from reverse DNS
             hostname_match = re.search(r'<hostname name="([^"]+)"', block)
             hostname = hostname_match.group(1) if hostname_match else None
 
-            # Submit host
-            host_kwargs = {'discovered_via': 'nmap_scan'}
-            if mac:
-                host_kwargs['mac_address'] = mac
-            if vendor:
-                host_kwargs['device_vendor'] = vendor
-            if os_name:
-                host_kwargs['os_name'] = os_name
-                host_kwargs['os_fingerprint_method'] = 'nmap'
-            if hostname:
-                host_kwargs['hostname'] = hostname
-
-            # Parse ports
+            # Parse open ports first (collect before submitting)
             host_ports = []
+            port_entries = []
             port_blocks = re.findall(r'<port protocol="(\w+)" portid="(\d+)">(.*?)</port>', block, re.DOTALL)
 
             for proto, portid, port_content in port_blocks:
@@ -207,52 +189,46 @@ class PortScanner(BaseScanner):
                     continue
 
                 port = int(portid)
-                service_match = re.search(
-                    r'<service name="([^"]*)"(?:\s+product="([^"]*)")?(?:\s+version="([^"]*)")?'
-                    r'(?:\s+extrainfo="([^"]*)")?',
-                    port_content
-                )
-
-                svc_name = service_match.group(1) if service_match else None
-                svc_product = service_match.group(2) if service_match else None
-                svc_version = service_match.group(3) if service_match else None
-                svc_extra = service_match.group(4) if service_match else None
-
-                # Build version string
-                version_str = ''
-                if svc_product:
-                    version_str = svc_product
-                    if svc_version:
-                        version_str += f' {svc_version}'
-
-                # Check for OT protocol
-                ot_info = self.get_ot_info(port)
-                is_ot = 1 if ot_info else 0
-                ot_name = ot_info[0] if ot_info else None
-
-                # Banner from extra info
-                banner = svc_extra
-
-                self.submit_service(
-                    ip, port, proto,
-                    state='open',
-                    service_name=svc_name or (ot_info[1] if ot_info else None),
-                    service_version=version_str or None,
-                    banner=banner,
-                    is_ot_protocol=is_ot,
-                    ot_protocol_name=ot_name
-                )
-
                 host_ports.append(port)
 
-            # Infer device type and criticality
+                # Check for OT protocol by port number
+                ot_info = self.get_ot_info(port)
+
+                port_entries.append({
+                    'port': port,
+                    'proto': proto,
+                    'is_ot': 1 if ot_info else 0,
+                    'ot_name': ot_info[0] if ot_info else None,
+                    'ot_display': ot_info[1] if ot_info else None,
+                })
+
+            # Build host kwargs
+            host_kwargs = {'discovered_via': 'nmap_scan'}
+            if mac:
+                host_kwargs['mac_address'] = mac
+            if vendor:
+                host_kwargs['device_vendor'] = vendor
+            if hostname:
+                host_kwargs['hostname'] = hostname
             if host_ports:
-                device_type = self.infer_device_type(host_ports, os_name, hostname)
+                device_type = self.infer_device_type(host_ports, None, hostname)
                 criticality = self.infer_criticality(device_type, host_ports)
                 host_kwargs['device_type'] = device_type
                 host_kwargs['criticality'] = criticality
 
+            # Submit HOST first so it exists in DB before services reference it
             self.submit_host(ip, **host_kwargs)
+
+            # Now submit services (port/protocol/state only — no version info)
+            for entry in port_entries:
+                self.submit_service(
+                    ip, entry['port'], entry['proto'],
+                    state='open',
+                    service_name=entry['ot_display'] if entry['is_ot'] else None,
+                    is_ot_protocol=entry['is_ot'],
+                    ot_protocol_name=entry['ot_name']
+                )
+
             results[ip] = host_ports
 
         return results

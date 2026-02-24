@@ -57,10 +57,12 @@ class ServiceScanner(BaseScanner):
         if not targets:
             return {'error': 'No valid targets specified'}
 
-        self.log(f"Service detection initiated on {len(targets)} hosts. "
+        self.log(f"Service detection scan initiated on {len(targets)} hosts. "
+                 f"Probes open ports discovered by Port Scan to identify running services. "
                  f"Actions: TCP connect to each known open port, send protocol-specific probes "
                  f"(HTTP GET, SSH banner wait, SMB negotiate, RDP handshake, Modbus Device ID, etc.), "
                  f"receive and fingerprint response banners. TLS certificate extraction on SSL ports. "
+                 f"Updates service name, version, and banner fields for each port. "
                  f"All operations are read-only.",
                  severity='ACTION', category='config',
                  raw_detail=f"Targets: {self.target}")
