@@ -72,6 +72,122 @@
         </div>
     </div>
 
+    <!-- Add Host Modal -->
+    <div class="modal-overlay" id="addHostModal" style="display:none;">
+        <div class="modal" style="width:500px;">
+            <div class="modal-header">
+                <h3>Add Host</h3>
+                <button class="modal-close" onclick="closeModal('addHostModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">IP Address *</label>
+                    <input type="text" class="form-input" id="newHostIp" placeholder="e.g., 10.0.1.50">
+                </div>
+                <div class="form-row" style="display:flex;gap:12px;">
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">Hostname</label>
+                        <input type="text" class="form-input" id="newHostHostname" placeholder="e.g., WORKSTATION-01">
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">Domain</label>
+                        <input type="text" class="form-input" id="newHostDomain" placeholder="e.g., corp.local">
+                    </div>
+                </div>
+                <div class="form-row" style="display:flex;gap:12px;">
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">Device Type</label>
+                        <select class="form-input" id="newHostType">
+                            <option value="unknown">Unknown</option>
+                            <option value="workstation">Workstation</option>
+                            <option value="server">Server</option>
+                            <option value="dc">Domain Controller</option>
+                            <option value="router">Router</option>
+                            <option value="switch">Switch</option>
+                            <option value="firewall">Firewall</option>
+                            <option value="plc">PLC</option>
+                            <option value="hmi">HMI</option>
+                            <option value="rtu">RTU</option>
+                            <option value="scada">SCADA</option>
+                            <option value="printer">Printer</option>
+                            <option value="iot">IoT Device</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">Criticality</label>
+                        <select class="form-input" id="newHostCrit">
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                            <option value="high">High</option>
+                            <option value="critical">Critical</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row" style="display:flex;gap:12px;">
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">OS Name</label>
+                        <input type="text" class="form-input" id="newHostOs" placeholder="e.g., Windows 10">
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">Vendor</label>
+                        <input type="text" class="form-input" id="newHostVendor" placeholder="e.g., Dell">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <textarea class="form-input" id="newHostNotes" rows="2" style="resize:vertical;" placeholder="Optional notes..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addHostModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="createHost()">Add Host</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Service Modal -->
+    <div class="modal-overlay" id="addServiceModal" style="display:none;">
+        <div class="modal" style="width:450px;">
+            <div class="modal-header">
+                <h3 id="addServiceTitle">Add Service</h3>
+                <button class="modal-close" onclick="closeModal('addServiceModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row" style="display:flex;gap:12px;">
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">Port *</label>
+                        <input type="number" class="form-input" id="newSvcPort" placeholder="e.g., 443" min="1" max="65535">
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">Protocol</label>
+                        <select class="form-input" id="newSvcProto">
+                            <option value="tcp">TCP</option>
+                            <option value="udp">UDP</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row" style="display:flex;gap:12px;">
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">Service Name</label>
+                        <input type="text" class="form-input" id="newSvcName" placeholder="e.g., https">
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">Version</label>
+                        <input type="text" class="form-input" id="newSvcVersion" placeholder="e.g., Apache 2.4">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <input type="text" class="form-input" id="newSvcNotes" placeholder="Optional notes...">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addServiceModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="createService()">Add Service</button>
+            </div>
+        </div>
+    </div>
+
     <script>
     const MISSION_ID = {{ mission_id }};
     let allHosts = [];
@@ -148,7 +264,7 @@
         const container = document.getElementById('tab-hosts');
 
         // Filter bar
-        let html = `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+        let html = `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
             <input type="text" class="form-input" style="max-width:250px;padding:6px 12px;font-size:12px;" placeholder="Filter hosts..." id="hostFilter" oninput="filterHosts()">
             <select class="form-input" style="max-width:150px;padding:6px 12px;font-size:12px;" id="typeFilter" onchange="filterHosts()">
                 <option value="">All Types</option>
@@ -163,6 +279,12 @@
                 <option value="">All Subnets</option>
                 ${[...new Set(allHosts.map(h=>h.subnet_cidr))].filter(Boolean).map(s=>`<option value="${s}">${s}</option>`).join('')}
             </select>
+            <div style="margin-left:auto;">
+                <button class="btn btn-primary" style="padding:6px 14px;font-size:12px;" onclick="showAddHostModal()">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                    Add Host
+                </button>
+            </div>
         </div>`;
 
         html += `<div class="panel"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
@@ -251,11 +373,26 @@
             </div>
         </div>`;
 
+        // Host Notes
+        html += `<div class="panel" style="margin-bottom:16px;">
+            <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">
+                Host Notes
+            </div>
+            <div style="padding:10px 14px;">
+                <textarea id="hostNotesArea" rows="3" placeholder="Add notes about this host..."
+                    style="width:100%;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:4px;padding:8px 10px;font-size:12px;font-family:'JetBrains Mono',monospace;resize:vertical;outline:none;box-sizing:border-box;"
+                    onfocus="this.style.borderColor='var(--accent-cyan)'"
+                    onblur="this.style.borderColor='var(--border-primary)'; saveHostNotes(${hostId})">${h.notes ? escapeHtml(h.notes) : ''}</textarea>
+            </div>
+        </div>`;
+
         // Services
-        if (data.services.length > 0) {
+        // Services section (always show - allow adding even if none exist)
+        {
             html += `<div class="panel" style="margin-bottom:16px;">
-                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">
-                    Open Services (${data.services.length})
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">Open Services (${data.services.length})</span>
+                    <button class="btn btn-secondary" style="padding:3px 10px;font-size:10px;" onclick="showAddServiceModal(${hostId})">+ Add Service</button>
                 </div>
                 <table class="data-table"><thead><tr><th>Port</th><th>Proto</th><th>Service</th><th>Version</th><th>OT</th><th>Notes</th></tr></thead><tbody>
                 ${data.services.map(s => `<tr>
@@ -487,6 +624,16 @@
         await loadHosts();
     }
 
+    async function saveHostNotes(hostId) {
+        const area = document.getElementById('hostNotesArea');
+        if (!area) return;
+        await fetch(`/api/hosts/${hostId}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({notes: area.value.trim() || null})
+        });
+    }
+
     function editServiceNote(cell, serviceId) {
         if (cell.querySelector('input')) return;
         const currentNote = cell.textContent.includes('add note') ? '' : cell.textContent.trim();
@@ -649,6 +796,86 @@
         const sizes = ['B', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    // ── Add Host ──
+    function showAddHostModal() {
+        document.getElementById('newHostIp').value = '';
+        document.getElementById('newHostHostname').value = '';
+        document.getElementById('newHostDomain').value = '';
+        document.getElementById('newHostType').value = 'unknown';
+        document.getElementById('newHostCrit').value = 'medium';
+        document.getElementById('newHostOs').value = '';
+        document.getElementById('newHostVendor').value = '';
+        document.getElementById('newHostNotes').value = '';
+        document.getElementById('addHostModal').style.display = 'flex';
+    }
+
+    async function createHost() {
+        const ip = document.getElementById('newHostIp').value.trim();
+        if (!ip) return alert('IP address is required');
+        const data = {
+            ip_address: ip,
+            hostname: document.getElementById('newHostHostname').value.trim() || null,
+            domain: document.getElementById('newHostDomain').value.trim() || null,
+            device_type: document.getElementById('newHostType').value,
+            criticality: document.getElementById('newHostCrit').value,
+            os_name: document.getElementById('newHostOs').value.trim() || null,
+            device_vendor: document.getElementById('newHostVendor').value.trim() || null,
+            notes: document.getElementById('newHostNotes').value.trim() || null,
+            discovered_via: 'manual'
+        };
+        const res = await fetch(`/api/missions/${MISSION_ID}/hosts`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        if (res.ok) {
+            closeModal('addHostModal');
+            await loadHosts();
+            await loadStats();
+        } else {
+            alert('Failed to add host');
+        }
+    }
+
+    // ── Add Service ──
+    let addServiceHostId = null;
+
+    function showAddServiceModal(hostId) {
+        addServiceHostId = hostId;
+        document.getElementById('addServiceTitle').textContent = `Add Service to Host`;
+        document.getElementById('newSvcPort').value = '';
+        document.getElementById('newSvcProto').value = 'tcp';
+        document.getElementById('newSvcName').value = '';
+        document.getElementById('newSvcVersion').value = '';
+        document.getElementById('newSvcNotes').value = '';
+        document.getElementById('addServiceModal').style.display = 'flex';
+    }
+
+    async function createService() {
+        const port = parseInt(document.getElementById('newSvcPort').value);
+        if (!port || port < 1 || port > 65535) return alert('Valid port number is required (1-65535)');
+        const data = {
+            port: port,
+            protocol: document.getElementById('newSvcProto').value,
+            service_name: document.getElementById('newSvcName').value.trim() || null,
+            service_version: document.getElementById('newSvcVersion').value.trim() || null,
+            notes: document.getElementById('newSvcNotes').value.trim() || null,
+            state: 'open'
+        };
+        const res = await fetch(`/api/hosts/${addServiceHostId}/services`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        if (res.ok) {
+            closeModal('addServiceModal');
+            await showHostDetail(addServiceHostId);
+            await loadHosts();
+        } else {
+            alert('Failed to add service');
+        }
     }
 
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }

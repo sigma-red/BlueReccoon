@@ -310,6 +310,26 @@ body::after {
     margin-bottom: 12px;
 }
 
+.btn-icon-delete {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 4px;
+    cursor: pointer;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.mission-card:hover .btn-icon-delete { opacity: 1; }
+.btn-icon-delete:hover {
+    color: var(--accent-red);
+    border-color: rgba(239, 68, 68, 0.3);
+    background: rgba(239, 68, 68, 0.1);
+}
+
 .mission-type-badge {
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
