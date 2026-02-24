@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPT RECON // Scan Control</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        .scan-layout { display: grid; grid-template-columns: 400px 1fr; gap: 0; height: calc(100vh - 52px); }
+        .scan-launcher { border-right: 1px solid var(--border-primary); overflow-y: auto; padding: 14px; }
+        .scan-jobs-panel { overflow-y: auto; padding: 14px 16px; }
+
+        /* ── Scan type cards ── */
+        .scan-type-card {
+            background: var(--bg-card); border: 1px solid var(--border-primary);
+            border-radius: var(--radius); padding: 10px 12px; margin-bottom: 5px;
+            cursor: pointer; transition: var(--transition);
+        }
+        .scan-type-card:hover { border-color: var(--border-accent); }
+        .scan-type-card.selected { border-color: var(--accent-blue); box-shadow: 0 0 0 1px var(--accent-blue); }
+        .scan-type-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+        .scan-type-name { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; color: var(--text-bright); }
+        .scan-type-brief { font-size: 10px; color: var(--text-muted); line-height: 1.3; }
+        .scan-type-mode {
+            display: inline-block; font-family: 'JetBrains Mono', monospace;
+            font-size: 8px; padding: 1px 5px; border-radius: 3px;
+            letter-spacing: 1px; text-transform: uppercase; flex-shrink: 0;
+        }
+        .mode-active { background: rgba(14,165,233,0.15); color: var(--accent-blue); }
+        .mode-passive { background: rgba(16,185,129,0.15); color: var(--accent-green); }
+        .mode-ot { background: rgba(239,68,68,0.15); color: var(--accent-red); }
+
+        /* ── Detail panel ── */
+        .scan-detail-panel {
+            background: var(--bg-secondary); border: 1px solid var(--border-primary);
+            border-radius: var(--radius); padding: 12px 14px; margin-top: 8px;
+            font-size: 11px; color: var(--text-secondary); line-height: 1.55;
+            max-height: 40vh; overflow-y: auto;
+        }
+        .detail-section-title {
+            font-family: 'JetBrains Mono', monospace; font-size: 9px;
+            text-transform: uppercase; letter-spacing: 1.2px; color: var(--accent-blue);
+            margin: 8px 0 4px 0; padding-bottom: 2px; border-bottom: 1px solid var(--border-primary);
+        }
+        .detail-section-title:first-child { margin-top: 0; }
+        .detail-item { font-size: 10.5px; color: var(--text-secondary); padding: 1px 0; }
+        .detail-item code {
+            background: var(--bg-primary); padding: 1px 4px; border-radius: 3px;
+            font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--accent-cyan);
+        }
+        .detail-bullet::before { content: '›'; color: var(--accent-blue); margin-right: 5px; }
+
+        /* ── Config panel ── */
+        .config-panel {
+            background: var(--bg-card); border: 1px solid var(--border-primary);
+            border-radius: var(--radius); padding: 12px 14px; margin-top: 8px;
+        }
+        .config-title {
+            font-family: 'JetBrains Mono', monospace; font-size: 9px;
+            text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); margin-bottom: 8px;
+        }
+        .aggression-slider {
+            width: 100%; margin: 4px 0; accent-color: var(--accent-blue);
+            -webkit-appearance: none; height: 4px; border-radius: 2px;
+            background: linear-gradient(to right, var(--accent-green), var(--accent-amber), var(--accent-red));
+        }
+        .aggression-labels { display: flex; justify-content: space-between; font-size: 8px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+        .ot-warning {
+            background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3);
+            border-radius: var(--radius); padding: 8px 12px; margin-bottom: 8px;
+            font-size: 10px; color: var(--accent-red); line-height: 1.5;
+        }
+
+        /* ── Scan job cards ── */
+        .scan-job {
+            background: var(--bg-card); border: 1px solid var(--border-primary);
+            border-radius: var(--radius-lg); margin-bottom: 10px; overflow: hidden;
+        }
+        .scan-job.job-running { border-color: rgba(14,165,233,0.4); }
+        .scan-job.job-completed { border-color: rgba(16,185,129,0.25); }
+        .scan-job.job-failed { border-color: rgba(239,68,68,0.25); }
+
+        .job-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 14px; cursor: pointer; user-select: none;
+        }
+        .job-header:hover { background: rgba(255,255,255,0.02); }
+        .job-left { display: flex; align-items: center; gap: 10px; }
+        .job-chevron {
+            width: 16px; height: 16px; color: var(--text-muted);
+            transition: transform 0.2s; flex-shrink: 0;
+        }
+        .job-chevron.open { transform: rotate(90deg); }
+        .job-type { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: var(--text-bright); }
+        .job-meta {
+            font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-muted);
+            white-space: normal; word-break: break-all; line-height: 1.5;
+        }
+        .job-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .scan-status-badge {
+            font-family: 'JetBrains Mono', monospace; font-size: 9px;
+            padding: 2px 7px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .status-running { background: rgba(14,165,233,0.2); color: var(--accent-blue); }
+        .status-completed { background: rgba(16,185,129,0.2); color: var(--accent-green); }
+        .status-failed { background: rgba(239,68,68,0.2); color: var(--accent-red); }
+        .status-pending { background: rgba(100,116,139,0.2); color: var(--text-muted); }
+        .status-cancelled { background: rgba(245,158,11,0.2); color: var(--accent-amber); }
+
+        .job-progress { padding: 0 14px; }
+        .progress-bar-bg { width: 100%; height: 3px; background: var(--bg-primary); border-radius: 2px; overflow: hidden; }
+        .progress-bar-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+        .progress-running { background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan)); }
+        .progress-completed { background: var(--accent-green); width: 100% !important; }
+        .progress-failed { background: var(--accent-red); }
+        .job-progress-msg {
+            font-family: 'JetBrains Mono', monospace; font-size: 10px;
+            color: var(--text-muted); padding: 4px 14px 0 14px;
+        }
+
+        /* ── Embedded console per scan job ── */
+        .job-console-wrapper {
+            overflow: hidden; transition: max-height 0.3s ease;
+        }
+        .job-console-wrapper.collapsed { max-height: 0; }
+        .job-console-wrapper.expanded { max-height: 600px; }
+
+        .console-toolbar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 6px 14px; background: rgba(0,0,0,0.2);
+            border-top: 1px solid var(--border-primary);
+        }
+        .console-toolbar-left { display: flex; align-items: center; gap: 6px; }
+        .console-toolbar-right { display: flex; align-items: center; gap: 4px; }
+        .console-label {
+            font-family: 'JetBrains Mono', monospace; font-size: 9px;
+            text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted);
+        }
+        .console-count {
+            font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--text-muted);
+        }
+        .log-filter-btn {
+            font-family: 'JetBrains Mono', monospace; font-size: 8px; padding: 2px 6px;
+            border-radius: 3px; border: 1px solid var(--border-primary); background: none;
+            color: var(--text-muted); cursor: pointer; transition: var(--transition);
+        }
+        .log-filter-btn.active { background: rgba(14,165,233,0.25); color: var(--accent-blue); border-color: rgba(14,165,233,0.4); }
+        .log-filter-btn:hover { border-color: var(--accent-blue); }
+        .console-btn {
+            font-family: 'JetBrains Mono', monospace; font-size: 8px; padding: 2px 7px;
+            border-radius: 3px; border: 1px solid var(--border-primary); background: none;
+            color: var(--text-muted); cursor: pointer;
+        }
+        .console-btn:hover { color: var(--text-bright); border-color: var(--border-accent); }
+
+        .console-box {
+            height: 220px; overflow-y: auto; background: #080c10;
+            font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+            padding: 4px 0; scroll-behavior: smooth;
+        }
+        .console-box::-webkit-scrollbar { width: 6px; }
+        .console-box::-webkit-scrollbar-track { background: transparent; }
+        .console-box::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+
+        .log-line {
+            padding: 1px 14px; display: flex; gap: 0; line-height: 1.55;
+            white-space: nowrap; min-height: 18px;
+        }
+        .log-line:hover { background: rgba(14,165,233,0.04); }
+        .log-ts { color: #334155; width: 62px; flex-shrink: 0; overflow: hidden; }
+        .log-sev { width: 48px; flex-shrink: 0; font-weight: 600; }
+        .sev-INFO { color: #475569; }
+        .sev-ACTION { color: #0ea5e9; }
+        .sev-SEND { color: #f59e0b; }
+        .sev-RECV { color: #10b981; }
+        .sev-WARN { color: #ef4444; }
+        .sev-ERROR { color: #dc2626; font-weight: 700; }
+        .log-cat { color: #6366f1; width: 80px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; }
+        .log-msg { color: #94a3b8; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+        .log-target { color: #06b6d4; margin-left: 8px; flex-shrink: 0; }
+        .log-tool-tag { color: #8b5cf6; margin-left: 6px; flex-shrink: 0; }
+
+        .log-detail-line {
+            padding: 0 14px 0 126px; color: #475569; font-size: 10px;
+            white-space: pre-wrap; word-break: break-all; line-height: 1.4;
+        }
+
+        .console-empty {
+            padding: 20px; text-align: center; color: #334155; font-size: 11px;
+        }
+
+        /* ── Top bar for right panel ── */
+        .jobs-topbar {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border-primary);
+        }
+        .jobs-topbar-left { display: flex; align-items: center; gap: 10px; }
+        .jobs-topbar-right { display: flex; align-items: center; gap: 6px; }
+
+        /* ── Toast ── */
+        .copy-toast {
+            position: fixed; bottom: 20px; right: 20px; background: var(--accent-green);
+            color: #fff; padding: 8px 18px; border-radius: var(--radius);
+            font-family: 'JetBrains Mono', monospace; font-size: 11px;
+            z-index: 9999; opacity: 0; transition: opacity 0.3s; pointer-events: none;
+        }
+        .copy-toast.show { opacity: 1; }
+
+        .no-jobs { text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 12px; }
+
+        /* ── Target Picker ── */
+        .target-input-row { display: flex; gap: 6px; align-items: flex-end; }
+        .target-input-row .form-group { flex: 1; margin-bottom: 0; }
+        .target-picker-btn {
+            height: 34px; padding: 0 10px; border: 1px solid var(--border-primary);
+            border-radius: var(--radius); background: var(--bg-secondary); color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace; font-size: 10px; cursor: pointer;
+            transition: var(--transition); white-space: nowrap; flex-shrink: 0;
+        }
+        .target-picker-btn:hover { border-color: var(--accent-blue); color: var(--text-bright); }
+        .target-picker-btn.active { border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(14,165,233,0.08); }
+
+        .target-dropdown {
+            background: var(--bg-secondary); border: 1px solid var(--border-accent);
+            border-radius: var(--radius); margin-top: 6px; max-height: 260px;
+            overflow-y: auto; display: none;
+        }
+        .target-dropdown.open { display: block; }
+        .td-section-title {
+            font-family: 'JetBrains Mono', monospace; font-size: 8px;
+            text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-muted);
+            padding: 8px 10px 3px 10px; border-bottom: 1px solid var(--border-primary);
+        }
+        .td-item {
+            display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+            cursor: pointer; font-size: 11px; color: var(--text-secondary);
+            transition: background 0.1s;
+        }
+        .td-item:hover { background: rgba(14,165,233,0.06); }
+        .td-item input[type="checkbox"] { flex-shrink: 0; accent-color: var(--accent-blue); }
+        .td-item-ip { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-bright); min-width: 110px; }
+        .td-item-info { font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .td-item-badge {
+            font-family: 'JetBrains Mono', monospace; font-size: 8px; padding: 1px 4px;
+            border-radius: 2px; flex-shrink: 0;
+        }
+        .td-quick-group {
+            display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 10px;
+            border-bottom: 1px solid var(--border-primary);
+        }
+        .td-quick-btn {
+            font-family: 'JetBrains Mono', monospace; font-size: 9px; padding: 3px 8px;
+            border-radius: 3px; border: 1px solid var(--border-primary); background: none;
+            color: var(--text-muted); cursor: pointer; transition: var(--transition);
+        }
+        .td-quick-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+        .td-apply-row { display: flex; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--border-primary); }
+
+        @media (max-width: 1000px) {
+            .scan-layout { grid-template-columns: 1fr; }
+            .scan-launcher { border-right: none; border-bottom: 1px solid var(--border-primary); max-height: 50vh; }
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-left">
+            <div class="nav-logo">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#0ea5e9" stroke-width="1.5"><circle cx="12" cy="12" r="10" opacity="0.4"/><circle cx="12" cy="12" r="3"/></svg>
+                <a href="/" style="text-decoration:none;"><span class="nav-title">CPT RECON</span></a>
+            </div>
+            <a href="/mission/{{ mission_id }}" style="text-decoration:none;"><div class="nav-breadcrumb">← Back to Mission</div></a>
+        </div>
+        <div class="nav-right">
+            <div class="nav-operator"><span class="operator-dot"></span><span>{{ session.get('operator', 'Operator') }}</span></div>
+        </div>
+    </nav>
+
+    <main class="main-content" style="padding:0;margin-top:52px;height:calc(100vh - 52px);">
+        <div class="scan-layout">
+
+            <!-- ═══ LEFT: Scan Launcher ═══ -->
+            <div class="scan-launcher">
+                <div class="config-title">Select Scan Type</div>
+                <div id="scanTypes"></div>
+                <div id="detailPanel" style="display:none;"></div>
+                <div id="configPanel" class="config-panel" style="display:none;">
+                    <div class="config-title">Configuration</div>
+                    <div id="otWarning" class="ot-warning" style="display:none;">
+                        <strong style="display:block;margin-bottom:3px;">⚠ OT/ICS SAFETY NOTICE</strong>
+                        All probes are <strong>read-only</strong> identification queries. Confirm <strong>safe-to-scan</strong>
+                        with the site operator before proceeding against OT networks.
+                    </div>
+                    <div class="target-input-row">
+                        <div class="form-group">
+                            <label class="form-label">Target (IP, CIDR, or Range)</label>
+                            <input type="text" class="form-input" id="scanTarget" placeholder="10.10.1.0/24 or 172.16.50.1-254" style="font-size:12px;">
+                        </div>
+                        <button class="target-picker-btn" id="pickerBtn" onclick="toggleTargetPicker()" title="Select from discovered hosts and subnets">⊞ Pick</button>
+                    </div>
+                    <div class="target-dropdown" id="targetDropdown"></div>
+                    <div class="form-group" id="aggrGroup" style="display:none;">
+                        <label class="form-label">Aggressiveness: <span id="aggrValue" style="color:var(--accent-blue);font-weight:600;">3</span></label>
+                        <input type="range" class="aggression-slider" id="aggrSlider" min="1" max="5" value="3" oninput="updateAggr(this.value)">
+                        <div class="aggression-labels"><span>1-Safe</span><span>2-Conserv</span><span>3-Normal</span><span>4-Aggr</span><span>5-Full</span></div>
+                        <div id="aggrWarning" style="display:none;margin-top:6px;padding:8px 10px;border-radius:4px;font-size:11px;line-height:1.5;border:1px solid var(--accent-amber);background:rgba(245,166,35,0.08);color:var(--accent-amber);">
+                            <strong>⚠ L5 — Full 65535-port scan</strong><br>
+                            Scans every TCP port on every target. Expected duration: <strong>15-45+ minutes</strong> depending on host count and network conditions. Generates significant traffic and will trigger IDS/IPS alerts. Not recommended unless lower levels missed expected services. L3/L4 cover the vast majority of real-world services.
+                        </div>
+                    </div>
+                    <div class="form-group" id="udpGroup" style="display:none;">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                            <input type="checkbox" id="scanUdp"><span class="form-label" style="margin:0;">Include UDP scanning</span>
+                        </label>
+                    </div>
+                    <div id="credFields" style="display:none;">
+                        <div class="config-title" style="margin-top:6px;">Credentials</div>
+                        <div class="form-group"><label class="form-label">Domain</label><input type="text" class="form-input" id="credDomain" placeholder="energy.local" style="font-size:12px;"></div>
+                        <div style="display:flex;gap:8px;">
+                            <div class="form-group" style="flex:1;"><label class="form-label">Username</label><input type="text" class="form-input" id="credUser" style="font-size:12px;"></div>
+                            <div class="form-group" style="flex:1;"><label class="form-label">Password</label><input type="password" class="form-input" id="credPass" style="font-size:12px;"></div>
+                        </div>
+                    </div>
+                    <div id="passiveFields" style="display:none;">
+                        <div style="display:flex;gap:8px;">
+                            <div class="form-group" style="flex:1;"><label class="form-label">Interface</label><input type="text" class="form-input" id="passiveIface" value="any" style="font-size:12px;"></div>
+                            <div class="form-group" style="flex:1;"><label class="form-label">Duration (sec)</label><input type="number" class="form-input" id="passiveDuration" value="60" min="10" max="3600" style="font-size:12px;"></div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" style="width:100%;margin-top:4px;font-size:12px;" onclick="launchScan()">Launch Scan</button>
+                </div>
+            </div>
+
+            <!-- ═══ RIGHT: Scan Jobs with embedded consoles ═══ -->
+            <div class="scan-jobs-panel">
+                <div class="jobs-topbar">
+                    <div class="jobs-topbar-left">
+                        <div class="config-title" style="margin:0;">Scan Jobs</div>
+                    </div>
+                    <div class="jobs-topbar-right">
+                        <button class="console-btn" onclick="exportAllLogs()" title="Download all logs as formatted text file">Export All Logs</button>
+                        <button class="console-btn" onclick="loadScans()" title="Refresh scan list">Refresh</button>
+                    </div>
+                </div>
+                <div id="scanJobsList"><div class="no-jobs">No scans launched yet. Select a scan type and configure a target.</div></div>
+            </div>
+        </div>
+    </main>
+
+    <div class="copy-toast" id="copyToast">Copied to clipboard</div>
+
+    <script>
+    const MISSION_ID = {{ mission_id }};
+    const socket = io();
+    let selectedType = null;
+    let scanProgress = {};       // scan_id → {progress, message}
+    let scanLogs = {};           // scan_id → [entries]
+    let scanFilters = {};        // scan_id → active filter
+    let expandedJobs = new Set(); // scan_ids with console open
+    let knownScans = [];         // latest scan list from API
+
+    // ════════════════════════════════════════════════════════════════
+    // SCAN TYPE DEFINITIONS
+    // ════════════════════════════════════════════════════════════════
+    const SCAN_TYPES = {
+        arp_sweep: {
+            name: 'Host Discovery', brief: 'Find live hosts via ARP/ICMP — no port scanning', mode: 'active',
+            detail: {
+                summary: 'Discovers live hosts using Layer 2 (ARP) and Layer 3 (ICMP) methods. Does NOT perform any port scanning.',
+                network_actions: [
+                    'Sends <code>ARP Who-Has</code> requests to each target IP (local subnet only)',
+                    'Sends <code>ICMP Echo Request</code> (ping) to each target IP',
+                    'If nmap available: executes <code>nmap -sn -PR -PE</code> (ping scan only, no port scan)',
+                    'Records MAC addresses from ARP replies and TTL values for passive OS guessing',
+                ],
+                tools_used: 'nmap (preferred), arping (fallback), or native ICMP ping',
+                ports_touched: 'None — host discovery only, no TCP/UDP ports probed',
+                protocols: 'ARP (Layer 2), ICMP (Layer 3)',
+                risk: 'Minimal. Standard network operations. May trigger IDS alerts for ICMP sweep patterns.',
+            }
+        },
+        port_scan: {
+            name: 'Port Scan', brief: 'TCP/UDP port scanning with configurable scope', mode: 'active',
+            detail: {
+                summary: 'Scans target hosts for open TCP (and optionally UDP) ports. Aggressiveness controls port count.',
+                network_actions: [
+                    'Sends <code>TCP SYN</code> packets to each port on each target (half-open scan via nmap)',
+                    'Nmap: <code>nmap -sS -sV -O -T[1-4]</code> — SYN scan + service version + OS detection',
+                    'Service version detection (<code>-sV</code>) sends protocol probes to open ports',
+                    'OS fingerprinting (<code>-O</code>) sends crafted TCP/ICMP packets to analyze stack',
+                    'Without nmap: full <code>TCP connect()</code> — completes 3-way handshake per port',
+                    'If UDP enabled: <code>UDP datagrams</code> to common service ports (53, 161, 500, etc.)',
+                ],
+                tools_used: 'nmap (preferred) or Python socket TCP connect scan',
+                ports_touched: 'L1: ~100+OT | L2: ~200+OT | L3: 1-1024+OT | L4: 1-5000+OT | L5: 1-65535. OT ports (102,502,2222,4840,20000,44818,47808) always included.',
+                protocols: 'TCP SYN, TCP connect, UDP (optional), ICMP (OS detection)',
+                risk: 'Moderate. Significant traffic. SYN scans trigger IDS. L5 on large subnets is very noisy.',
+            }
+        },
+        service_scan: {
+            name: 'Service Detection', brief: 'Banner grabbing and version fingerprinting on open ports', mode: 'active',
+            detail: {
+                summary: 'Connects to known open ports and identifies running services via protocol probes and banner analysis.',
+                network_actions: [
+                    '<code>TCP connect</code> to each open port from prior scans',
+                    'Protocol probes: <code>HTTP GET /</code>, SSH banner wait, <code>SMB Negotiate</code>, <code>RDP X.224</code>, etc.',
+                    'TLS ports: <code>TLS handshake</code> + server certificate extraction (subject, SAN, issuer)',
+                    'OT ports: read-only identification probes (Modbus FC43, S7comm COTP, etc.)',
+                ],
+                tools_used: 'Python socket with protocol-specific probe library',
+                ports_touched: 'Only ports previously identified as open',
+                protocols: 'TCP (HTTP, SSH, SMB, RDP, FTP, SMTP, LDAP, TLS, etc.)',
+                risk: 'Low-moderate. Connects to already-known ports. Brief connections. Standard client behavior.',
+            }
+        },
+        os_detect: {
+            name: 'OS Detection', brief: 'Active and passive OS fingerprinting', mode: 'active',
+            detail: {
+                summary: 'Identifies target OS through TCP/IP stack fingerprinting or passive TTL analysis.',
+                network_actions: [
+                    'Nmap: <code>nmap -O --osscan-guess</code> — crafted TCP/UDP/ICMP to analyze stack implementation',
+                    'Passive: single <code>ICMP Echo Request</code>, infer OS from TTL (Linux ≤64, Windows ≤128)',
+                ],
+                tools_used: 'nmap (active) or native ping (passive)',
+                ports_touched: 'Nmap may probe 1 open + 1 closed port per host',
+                protocols: 'TCP, UDP, ICMP',
+                risk: 'Low. Small number of crafted packets. Passive uses only standard ping.',
+            }
+        },
+        ot_scan: {
+            name: 'OT/ICS Protocol Scan', brief: 'Read-only industrial protocol probes with rate limiting', mode: 'ot',
+            detail: {
+                summary: 'Probes for OT/ICS protocol presence using read-only identification commands. Built-in rate limiting.',
+                network_actions: [
+                    '<strong>Modbus/TCP (502):</strong> <code>Read Device Identification</code> FC 43, MEI 14 — requests vendor name, product code, revision. NO registers read/written.',
+                    '<strong>S7comm (102):</strong> <code>COTP Connection Request</code> + <code>S7 Setup Communication</code> — NO PLC program accessed, NO outputs toggled.',
+                    '<strong>DNP3 (20000):</strong> Minimal <code>Data Link Layer</code> frame (0x0564) — protocol presence test only. NO application commands.',
+                    '<strong>EtherNet/IP (44818):</strong> <code>ListIdentity</code> (0x0063) — standard CIP discovery. Returns vendor/product/serial. NO CIP services invoked.',
+                    '<strong>BACnet/IP (47808/udp):</strong> <code>Who-Is</code> — standard discovery. NO objects read/written.',
+                    '<strong>OPC UA (4840):</strong> <code>Hello</code> message — tests for server. NO sessions opened, NO nodes browsed.',
+                    'Rate limiting: L1=5s, L2=2s, L3=1s, L4=0.5s, L5=0.2s between probes per host',
+                ],
+                tools_used: 'Python socket with hand-crafted protocol frames',
+                ports_touched: '102, 502, 4840, 20000, 44818 (TCP) and 47808 (UDP)',
+                protocols: 'Modbus/TCP, S7comm, DNP3, EtherNet/IP, BACnet/IP, OPC UA',
+                risk: '<strong>OT-SENSITIVE.</strong> All probes are read-only. Legacy PLCs/RTUs may fault on unexpected TCP connects. Confirm safe-to-scan with site operator.',
+            }
+        },
+        smb_enum: {
+            name: 'SMB Enumeration', brief: 'Shares, users, domain info via SMB/NetBIOS', mode: 'active',
+            detail: {
+                summary: 'Enumerates Windows file shares, domain users, and domain membership.',
+                network_actions: [
+                    '<code>NetBIOS Name Query</code> (UDP 137) — resolve hostname and domain',
+                    '<code>SMB (TCP 445)</code> — list available shares (net view equivalent)',
+                    'If credentials: <code>SAMR RPC</code> to enumerate domain users',
+                    'May use <code>enum4linux-ng</code> for comprehensive enumeration',
+                ],
+                tools_used: 'enum4linux-ng, smbclient, rpcclient, nmblookup',
+                ports_touched: '445/tcp, 139/tcp, 137/udp',
+                protocols: 'SMB/CIFS, NetBIOS, MSRPC',
+                risk: 'Low-moderate. Standard Windows queries. Auth queries appear in DC audit logs.',
+            }
+        },
+        ad_enum: {
+            name: 'AD Enumeration', brief: 'Domain controllers, trusts, OUs, privileged groups, SPNs', mode: 'active',
+            detail: {
+                summary: 'Comprehensive Active Directory enumeration via LDAP.',
+                network_actions: [
+                    '<code>LDAP Root DSE</code> query (unauthenticated) — domain name, forest, functional level',
+                    'Authenticated <code>LDAP search</code> for: DCs, trusts, OUs, privileged groups (Domain Admins, Enterprise Admins, Schema Admins, etc.), Kerberoastable SPNs',
+                    'All queries are <strong>LDAP search (read-only)</strong> — no objects created/modified',
+                ],
+                tools_used: 'ldapsearch, nmap ldap-rootdse (fallback)',
+                ports_touched: '389/tcp, 636/tcp',
+                protocols: 'LDAP, LDAPS',
+                risk: 'Low. Auth queries generate Windows Event 4662. LDAP binds appear in DC auth logs.',
+            }
+        },
+        snmp_enum: {
+            name: 'SNMP Enumeration', brief: 'Community string testing and device info', mode: 'active',
+            detail: {
+                summary: 'Tests SNMP community strings and queries device system info.',
+                network_actions: [
+                    '<code>SNMP GetRequest</code> (UDP 161) with community strings: public, private, community, snmp, monitor, admin, default',
+                    'On success: reads sysDescr, sysName, sysLocation, sysContact — all <code>SNMP v2c GET</code> (read-only)',
+                ],
+                tools_used: 'snmpget (net-snmp), nmap snmp-info (fallback)',
+                ports_touched: '161/udp',
+                protocols: 'SNMP v2c',
+                risk: 'Low. Read-only queries. Failed strings may be logged by SNMP agents.',
+            }
+        },
+        passive_capture: {
+            name: 'Passive Capture', brief: 'Listen only — zero packets sent', mode: 'passive',
+            detail: {
+                summary: 'Captures live traffic without transmitting any packets. Discovers hosts from observed traffic.',
+                network_actions: [
+                    '<strong>NO PACKETS SENT.</strong> Purely passive operation.',
+                    'Interface placed in promiscuous mode to observe all visible traffic',
+                    'Records src/dst IPs, ports, protocols. Passive OS fingerprinting via TTL.',
+                ],
+                tools_used: 'tshark (preferred) or tcpdump',
+                ports_touched: 'None — passive listening only',
+                protocols: 'All observed protocols recorded (no traffic generated)',
+                risk: 'None to network. Promiscuous mode detectable by local tools. Captured data may contain sensitive content.',
+            }
+        },
+        full_active: {
+            name: 'Full Active Enumeration', brief: 'All active scans sequentially', mode: 'active',
+            detail: {
+                summary: 'Runs complete pipeline: Discovery → Ports → Services → OT → SNMP.',
+                network_actions: [
+                    '<strong>Phase 1:</strong> Host Discovery (ARP/ICMP)',
+                    '<strong>Phase 2:</strong> Port Scan (TCP SYN)',
+                    '<strong>Phase 3:</strong> Service Detection (banner grab)',
+                    '<strong>Phase 4:</strong> OT Protocol Scan (read-only, aggression auto-reduced by 1)',
+                    '<strong>Phase 5:</strong> SNMP Enumeration (community string testing)',
+                ],
+                tools_used: 'All tools from component scans',
+                ports_touched: 'All ports from component scans — see individual descriptions',
+                protocols: 'TCP, UDP, ICMP, ARP, SNMP, Modbus, S7, DNP3, EtherNet/IP, BACnet, OPC UA',
+                risk: 'Cumulative. Noisiest option. Significant traffic over extended period. Suitable for permissive ROE.',
+            }
+        },
+    };
+
+    // ════════════════════════════════════════
+    // Build scan type cards
+    // ════════════════════════════════════════
+    function buildScanTypes() {
+        document.getElementById('scanTypes').innerHTML = Object.entries(SCAN_TYPES).map(([key, s]) => {
+            const mc = s.mode==='passive'?'mode-passive':s.mode==='ot'?'mode-ot':'mode-active';
+            const ml = s.mode==='passive'?'Passive':s.mode==='ot'?'OT-Safe':'Active';
+            return `<div class="scan-type-card" data-type="${key}" onclick="selectScan('${key}',this)">
+                <div class="scan-type-header"><span class="scan-type-name">${s.name}</span><span class="scan-type-mode ${mc}">${ml}</span></div>
+                <div class="scan-type-brief">${s.brief}</div></div>`;
+        }).join('');
+    }
+
+    function selectScan(type, el) {
+        document.querySelectorAll('.scan-type-card').forEach(c => c.classList.remove('selected'));
+        el.classList.add('selected');
+        selectedType = type;
+        const d = SCAN_TYPES[type].detail;
+        document.getElementById('detailPanel').style.display = 'block';
+        document.getElementById('detailPanel').innerHTML = `<div class="scan-detail-panel">
+            <div style="font-size:11px;color:var(--text-primary);line-height:1.5;margin-bottom:6px;">${d.summary}</div>
+            <div class="detail-section-title">Exact Network Actions</div>
+            ${d.network_actions.map(a => `<div class="detail-item detail-bullet">${a}</div>`).join('')}
+            <div class="detail-section-title">Tools Used</div><div class="detail-item">${d.tools_used}</div>
+            <div class="detail-section-title">Ports Touched</div><div class="detail-item">${d.ports_touched}</div>
+            <div class="detail-section-title">Protocols</div><div class="detail-item">${d.protocols}</div>
+            <div class="detail-section-title">Risk Assessment</div>
+            <div class="detail-item" style="color:${d.risk.includes('OT-SENSITIVE')?'var(--accent-red)':d.risk.startsWith('None')?'var(--accent-green)':'var(--text-secondary)'};">${d.risk}</div>
+        </div>`;
+        document.getElementById('configPanel').style.display = 'block';
+        document.getElementById('otWarning').style.display = type==='ot_scan'?'block':'none';
+        document.getElementById('aggrGroup').style.display = ['port_scan','ot_scan','full_active'].includes(type)?'block':'none';
+        document.getElementById('udpGroup').style.display = type==='port_scan'?'block':'none';
+        document.getElementById('credFields').style.display = ['smb_enum','ad_enum','host_profile'].includes(type)?'block':'none';
+        document.getElementById('passiveFields').style.display = type==='passive_capture'?'block':'none';
+        if (type==='ot_scan') { document.getElementById('aggrSlider').value=2; updateAggr(2); }
+    }
+
+    function updateAggr(v) {
+        const el = document.getElementById('aggrValue');
+        el.textContent = v;
+        el.style.color = {1:'var(--accent-green)',2:'var(--accent-green)',3:'var(--accent-blue)',4:'var(--accent-amber)',5:'var(--accent-red)'}[v];
+        const warn = document.getElementById('aggrWarning');
+        if (parseInt(v) === 5) {
+            warn.style.display = 'block';
+            warn.style.borderColor = 'var(--accent-red)';
+            warn.style.color = 'var(--accent-red)';
+            warn.style.background = 'rgba(235,87,87,0.08)';
+            warn.innerHTML = '<strong>⚠ L5 — Full 65535-port scan</strong><br>' +
+                'Scans every TCP port on every target. Expected duration: <strong>15–45+ minutes</strong> depending on host count and network conditions. ' +
+                'Generates significant traffic and will trigger IDS/IPS alerts. <strong>Not recommended unless lower levels missed expected services.</strong> L3/L4 cover the vast majority of real-world services.';
+        } else if (parseInt(v) === 4) {
+            warn.style.display = 'block';
+            warn.style.borderColor = 'var(--accent-amber)';
+            warn.style.color = 'var(--accent-amber)';
+            warn.style.background = 'rgba(245,166,35,0.08)';
+            warn.innerHTML = '<strong>⚠ L4 — Aggressive (5000 ports)</strong><br>' +
+                'Scans ports 1–5000 plus OT ports. Noticeable traffic increase over L3. May take several minutes on large target sets.';
+        } else {
+            warn.style.display = 'none';
+        }
+    }
+
+    // ════════════════════════════════════════
+    // Launch scan
+    // ════════════════════════════════════════
+    async function launchScan() {
+        if (!selectedType) return;
+        const target = document.getElementById('scanTarget').value;
+        if (!target && selectedType !== 'passive_capture') return alert('Specify a target');
+        const aggr = parseInt(document.getElementById('aggrSlider').value);
+
+        // L5 confirmation for scan types that use aggressiveness
+        if (aggr === 5 && ['port_scan','full_active'].includes(selectedType)) {
+            const confirmed = await showL5Confirm(selectedType);
+            if (!confirmed) return;
+        }
+
+        const config = {};
+        if (['smb_enum','ad_enum','host_profile'].includes(selectedType))
+            config.credentials = { domain: document.getElementById('credDomain').value, username: document.getElementById('credUser').value, password: document.getElementById('credPass').value };
+        if (selectedType === 'passive_capture') {
+            config.interface = document.getElementById('passiveIface').value;
+            config.duration = parseInt(document.getElementById('passiveDuration').value);
+        }
+        if (selectedType === 'port_scan') config.scan_udp = document.getElementById('scanUdp').checked;
+        const res = await fetch(`/api/missions/${MISSION_ID}/scans`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ job_type: selectedType, target, mode: selectedType==='passive_capture'?'passive':'active',
+                aggressiveness: aggr, config, auto_start: true })
+        });
+        if (res.ok) {
+            const r = await res.json();
+            expandedJobs.add(r.id);
+            scanLogs[r.id] = [];
+            scanFilters[r.id] = 'all';
+            showToast(`Scan #${r.id} launched`);
+            loadScans();
+        }
+    }
+
+    function showL5Confirm(scanType) {
+        return new Promise(resolve => {
+            // Remove any existing modal
+            const old = document.getElementById('l5ConfirmModal');
+            if (old) old.remove();
+
+            const typeName = scanType === 'full_active' ? 'Full Active Enumeration' : 'Port Scan';
+            const modal = document.createElement('div');
+            modal.id = 'l5ConfirmModal';
+            modal.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(3px);';
+            modal.innerHTML = `
+                <div style="background:var(--bg-secondary);border:1px solid var(--accent-red);border-radius:8px;padding:24px;max-width:460px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                        <span style="font-size:22px;">⚠️</span>
+                        <span style="font-size:15px;font-weight:700;color:var(--accent-red);">Level 5 — Full Port Scan Confirmation</span>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-secondary);line-height:1.7;margin-bottom:16px;">
+                        You are about to launch <strong style="color:var(--text-primary);">${typeName}</strong> at <strong style="color:var(--accent-red);">Level 5</strong>, which scans all 65,535 TCP ports on every target host.
+                        <div style="margin:12px 0;padding:10px;border-radius:4px;background:rgba(235,87,87,0.06);border-left:3px solid var(--accent-red);">
+                            <strong style="color:var(--text-primary);">Operator advisory:</strong><br>
+                            • Expected scan time: <strong>15–45+ minutes</strong><br>
+                            • Generates high traffic volume — will trigger IDS/IPS<br>
+                            • L3 (top 1024) and L4 (top 5000) cover &gt;95% of real-world services<br>
+                            • Use L5 only if lower scans missed ports you expect to find
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:10px;justify-content:flex-end;">
+                        <button id="l5BtnCancel" style="padding:7px 18px;border-radius:4px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-secondary);cursor:pointer;font-size:12px;">Cancel</button>
+                        <button id="l5BtnConfirm" style="padding:7px 18px;border-radius:4px;border:1px solid var(--accent-red);background:var(--accent-red);color:#fff;cursor:pointer;font-size:12px;font-weight:600;">Launch L5 Scan</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+
+            document.getElementById('l5BtnCancel').onclick = () => { modal.remove(); resolve(false); };
+            document.getElementById('l5BtnConfirm').onclick = () => { modal.remove(); resolve(true); };
+            modal.onclick = e => { if (e.target === modal) { modal.remove(); resolve(false); } };
+        });
+    }
+
+    // ════════════════════════════════════════
+    // Render scan jobs
+    // ════════════════════════════════════════
+    const TYPE_LABELS = Object.fromEntries(Object.entries(SCAN_TYPES).map(([k,v]) => [k, v.name]));
+
+    async function loadScans() {
+        const res = await fetch(`/api/missions/${MISSION_ID}/scans`);
+        const newScans = await res.json();
+
+        // Detect if the scan list itself changed (new scan added/removed)
+        const oldIds = knownScans.map(s => s.id).join(',');
+        const newIds = newScans.map(s => s.id).join(',');
+        const listChanged = oldIds !== newIds;
+
+        knownScans = newScans;
+
+        if (listChanged) {
+            renderJobsFull();   // Full rebuild — list structure changed
+        } else {
+            renderJobsIncremental();  // Surgical update — no DOM destruction
+        }
+    }
+
+    function renderJobsFull() {
+        const container = document.getElementById('scanJobsList');
+        if (knownScans.length === 0) { container.innerHTML = '<div class="no-jobs">No scans launched yet. Select a scan type and configure a target.</div>'; return; }
+
+        // Auto-expand running scans
+        knownScans.forEach(s => { if (s.status === 'running') expandedJobs.add(s.id); });
+
+        container.innerHTML = knownScans.map(s => buildJobHTML(s)).join('');
+
+        // Render log lines into each console
+        knownScans.forEach(s => renderConsole(s.id));
+    }
+
+    function renderJobsIncremental() {
+        // Only update fields that change — leave console DOM completely untouched
+        knownScans.forEach(s => {
+            const prog = scanProgress[s.id] || {};
+            const pct = prog.progress || (s.status==='completed'?100:s.status==='failed'?5:0);
+            const msg = prog.message || '';
+            const logCount = (scanLogs[s.id] || []).length;
+
+            // Auto-expand newly running scans
+            if (s.status === 'running') expandedJobs.add(s.id);
+
+            // Update status badge
+            const badge = document.querySelector(`#job-${s.id} .scan-status-badge`);
+            if (badge && badge.textContent !== s.status) {
+                badge.textContent = s.status;
+                badge.className = `scan-status-badge status-${s.status}`;
+            }
+
+            // Update job card border class
+            const card = document.getElementById(`job-${s.id}`);
+            if (card) {
+                card.className = 'scan-job ' + (s.status==='running'?'job-running':s.status==='completed'?'job-completed':s.status==='failed'?'job-failed':'');
+            }
+
+            // Update progress bar
+            const bar = document.getElementById(`pbar-${s.id}`);
+            if (bar) bar.style.width = `${pct}%`;
+
+            // Update progress message
+            const msgEl = document.getElementById(`pmsg-${s.id}`);
+            if (msgEl) msgEl.textContent = msg;
+
+            // Update log count in header
+            const hdrCount = document.getElementById(`hdrcount-${s.id}`);
+            if (hdrCount) hdrCount.textContent = logCount > 0 ? `${logCount} log entries` : '';
+
+            // Update cancel/stop buttons — replace the action-btns container
+            const actionsEl = document.getElementById(`actions-${s.id}`);
+            if (actionsEl) {
+                const newActions = buildActionButtons(s);
+                if (actionsEl.innerHTML !== newActions) actionsEl.innerHTML = newActions;
+            }
+        });
+    }
+
+    function buildActionButtons(s) {
+        if (s.status === 'running') {
+            return `<button class="console-btn" onclick="event.stopPropagation();cancelScan(${s.id})" style="color:var(--accent-red);border-color:rgba(239,68,68,0.4);" title="Stop running scan">Cancel</button>`;
+        }
+        if (s.status === 'pending') {
+            return `<button class="console-btn" onclick="event.stopPropagation();cancelScan(${s.id})" style="color:var(--accent-amber);border-color:rgba(245,158,11,0.4);" title="Cancel pending scan">Cancel</button>`;
+        }
+        return '';
+    }
+
+    function buildJobHTML(s) {
+        const prog = scanProgress[s.id] || {};
+        const pct = prog.progress || (s.status==='completed'?100:s.status==='failed'?5:0);
+        const msg = prog.message || '';
+        const isOpen = expandedJobs.has(s.id);
+        const logCount = (scanLogs[s.id] || []).length;
+        const stateClass = s.status==='running'?'job-running':s.status==='completed'?'job-completed':s.status==='failed'?'job-failed':'';
+        const progClass = s.status==='completed'?'progress-completed':s.status==='failed'?'progress-failed':'progress-running';
+        const showBar = s.status === 'running' || pct > 0;
+        const filter = scanFilters[s.id] || 'all';
+
+        return `<div class="scan-job ${stateClass}" id="job-${s.id}">
+            <div class="job-header" onclick="toggleConsole(${s.id})">
+                <div class="job-left">
+                    <svg class="job-chevron ${isOpen?'open':''}" id="chevron-${s.id}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                    <div>
+                        <span class="job-type">${TYPE_LABELS[s.job_type]||s.job_type}</span>
+                        <span class="job-meta" style="display:inline;margin-left:8px;">#${s.id}</span>
+                        <div class="job-meta">${esc(s.target)||'N/A'}</div>
+                        <div class="job-meta">L${s.aggressiveness} · ${s.created_by||'operator'} · ${fmtTime(s.created_at)}</div>
+                    </div>
+                </div>
+                <div class="job-right">
+                    <span class="console-count" id="hdrcount-${s.id}">${logCount>0?logCount+' log entries':''}</span>
+                    <span class="scan-status-badge status-${s.status}">${s.status}</span>
+                    <span id="actions-${s.id}">${buildActionButtons(s)}</span>
+                </div>
+            </div>
+            ${showBar?`<div class="job-progress"><div class="progress-bar-bg"><div class="progress-bar-fill ${progClass}" id="pbar-${s.id}" style="width:${pct}%"></div></div></div>`:''}
+            <div class="job-progress-msg" id="pmsg-${s.id}">${msg}</div>
+            <div class="job-console-wrapper ${isOpen?'expanded':'collapsed'}" id="console-wrap-${s.id}">
+                <div class="console-toolbar">
+                    <div class="console-toolbar-left">
+                        <span class="console-label">Actions Log</span>
+                        <span class="console-count" id="ccount-${s.id}">${logCount} entries</span>
+                        <div style="width:1px;height:12px;background:var(--border-primary);margin:0 2px;"></div>
+                        ${['all','SEND','RECV','ACTION','discovery','WARN'].map(f =>
+                            `<button class="log-filter-btn ${filter===f?'active':''}" onclick="event.stopPropagation();setJobFilter(${s.id},'${f}',this)">${f==='discovery'?'Disc':f==='all'?'All':f[0]+f.slice(1).toLowerCase()}</button>`
+                        ).join('')}
+                    </div>
+                    <div class="console-toolbar-right">
+                        <button class="console-btn" onclick="event.stopPropagation();copyJobLog(${s.id})" title="Copy this scan's log to clipboard">Copy</button>
+                    </div>
+                </div>
+                <div class="console-box" id="console-${s.id}"></div>
+            </div>
+        </div>`;
+    }
+
+    function toggleConsole(scanId) {
+        if (expandedJobs.has(scanId)) expandedJobs.delete(scanId);
+        else expandedJobs.add(scanId);
+        const wrap = document.getElementById(`console-wrap-${scanId}`);
+        const chev = document.getElementById(`chevron-${scanId}`);
+        if (wrap) wrap.classList.toggle('expanded'); if (wrap) wrap.classList.toggle('collapsed');
+        if (chev) chev.classList.toggle('open');
+    }
+
+    // ════════════════════════════════════════
+    // Console rendering
+    // ════════════════════════════════════════
+    function renderConsole(scanId) {
+        const box = document.getElementById(`console-${scanId}`);
+        if (!box) return;
+        const entries = scanLogs[scanId] || [];
+        const filter = scanFilters[scanId] || 'all';
+
+        // Remember scroll position before re-render
+        const prevScrollTop = box.scrollTop;
+        const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+
+        const filtered = entries.filter(e => {
+            if (filter === 'all') return true;
+            if (filter === 'discovery') return e.category === 'discovery';
+            return e.severity === filter;
+        });
+
+        if (filtered.length === 0) {
+            box.innerHTML = `<div class="console-empty">No log entries${filter!=='all'?' match this filter':''}.</div>`;
+            return;
+        }
+
+        box.innerHTML = filtered.map(e => {
+            const ts = e.timestamp ? (e.timestamp.split(' ')[1] || e.timestamp).substring(0,8) : '';
+            const tgt = e.target_ip ? (e.target_port ? `${e.target_ip}:${e.target_port}` : e.target_ip) : '';
+            const hasDetail = e.command || e.raw_detail;
+            return `<div class="log-line${hasDetail?' _expandable':''}" ${hasDetail?`onclick="toggleDetail(this)"`:''}>`+
+                `<span class="log-ts">${ts}</span>`+
+                `<span class="log-sev sev-${e.severity}">${e.severity}</span>`+
+                `<span class="log-cat">${e.category}</span>`+
+                `<span class="log-msg">${esc(e.message)}</span>`+
+                `${tgt?`<span class="log-target">${tgt}</span>`:''}`+
+                `${e.tool?`<span class="log-tool-tag">[${e.tool}]</span>`:''}`+
+                `</div>`+
+                (hasDetail?`<div class="log-detail-line" style="display:none;">${e.command?'CMD: '+esc(e.command)+'\n':''}${e.raw_detail?'DETAIL: '+esc(e.raw_detail):''}</div>`:'');
+        }).join('');
+
+        // Scroll: only auto-scroll to bottom if user was already at the bottom,
+        // otherwise restore their previous position
+        if (wasAtBottom || prevScrollTop === 0) {
+            box.scrollTop = box.scrollHeight;
+        } else {
+            box.scrollTop = prevScrollTop;
+        }
+
+        // Update count
+        const countEl = document.getElementById(`ccount-${scanId}`);
+        if (countEl) countEl.textContent = `${filtered.length}/${entries.length} entries`;
+    }
+
+    function toggleDetail(lineEl) {
+        const detail = lineEl.nextElementSibling;
+        if (detail && detail.classList.contains('log-detail-line')) {
+            detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+        }
+    }
+
+    function appendLogEntry(scanId, entry) {
+        if (!scanLogs[scanId]) scanLogs[scanId] = [];
+        scanLogs[scanId].push(entry);
+
+        // If console is rendered and expanded, append directly for performance
+        const box = document.getElementById(`console-${scanId}`);
+        if (!box) return;
+        if (!expandedJobs.has(scanId)) return;
+
+        const filter = scanFilters[scanId] || 'all';
+        const passes = filter === 'all' ||
+                       (filter === 'discovery' && entry.category === 'discovery') ||
+                       (filter !== 'discovery' && entry.severity === filter);
+        if (!passes) return;
+
+        // Remove empty placeholder
+        const empty = box.querySelector('.console-empty');
+        if (empty) empty.remove();
+
+        const ts = entry.timestamp ? (entry.timestamp.split(' ')[1] || entry.timestamp).substring(0,8) : '';
+        const tgt = entry.target_ip ? (entry.target_port ? `${entry.target_ip}:${entry.target_port}` : entry.target_ip) : '';
+        const hasDetail = entry.command || entry.raw_detail;
+
+        let html = `<div class="log-line${hasDetail?' _expandable':''}" ${hasDetail?'onclick="toggleDetail(this)"':''}>` +
+            `<span class="log-ts">${ts}</span>` +
+            `<span class="log-sev sev-${entry.severity}">${entry.severity}</span>` +
+            `<span class="log-cat">${entry.category}</span>` +
+            `<span class="log-msg">${esc(entry.message)}</span>` +
+            `${tgt?`<span class="log-target">${tgt}</span>`:''}` +
+            `${entry.tool?`<span class="log-tool-tag">[${entry.tool}]</span>`:''}` +
+            `</div>`;
+        if (hasDetail)
+            html += `<div class="log-detail-line" style="display:none;">${entry.command?'CMD: '+esc(entry.command)+'\n':''}${entry.raw_detail?'DETAIL: '+esc(entry.raw_detail):''}</div>`;
+
+        box.insertAdjacentHTML('beforeend', html);
+
+        // Auto-scroll if near bottom
+        const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+        if (atBottom) box.scrollTop = box.scrollHeight;
+
+        // Update counts
+        const total = scanLogs[scanId].length;
+        const shown = box.querySelectorAll('.log-line').length;
+        const countEl = document.getElementById(`ccount-${scanId}`);
+        if (countEl) countEl.textContent = `${shown}/${total} entries`;
+        const hdrCount = document.getElementById(`hdrcount-${scanId}`);
+        if (hdrCount) hdrCount.textContent = `${total} log entries`;
+    }
+
+    function setJobFilter(scanId, filter, btn) {
+        scanFilters[scanId] = filter;
+        // Update active button
+        btn.closest('.console-toolbar-left').querySelectorAll('.log-filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        renderConsole(scanId);
+    }
+
+    // ════════════════════════════════════════
+    // Copy / Export
+    // ════════════════════════════════════════
+    function formatLogEntries(entries, header) {
+        const lines = [];
+        if (header) lines.push(header, '='.repeat(80), '');
+        entries.forEach(e => {
+            let line = `[${e.timestamp||''}] [${(e.severity||'').padEnd(6)}] [${e.category||''}] ${e.message||''}`;
+            if (e.target_ip) {
+                let t = e.target_ip;
+                if (e.target_port) t += `:${e.target_port}`;
+                if (e.protocol) t += ` (${e.protocol})`;
+                line += `  →  ${t}`;
+            }
+            if (e.tool) line += `  [tool: ${e.tool}]`;
+            lines.push(line);
+            if (e.command) lines.push(`    CMD: ${e.command}`);
+            if (e.raw_detail) lines.push(`    DETAIL: ${e.raw_detail}`);
+        });
+        lines.push('', '='.repeat(80), 'END OF LOG');
+        return lines.join('\n');
+    }
+
+    function copyJobLog(scanId) {
+        const entries = scanLogs[scanId] || [];
+        if (entries.length === 0) return showToast('No log entries to copy');
+        const scan = knownScans.find(s => s.id === scanId);
+        const header = `CPT RECON — ACTIONS ON NETWORK LOG\nScan #${scanId}: ${TYPE_LABELS[scan?.job_type]||'Unknown'}\nTarget: ${scan?.target||'N/A'}\nOperator: ${scan?.created_by||'unknown'}\nCopied: ${new Date().toISOString()}\nEntries: ${entries.length}`;
+        navigator.clipboard.writeText(formatLogEntries(entries, header)).then(() => showToast('Log copied to clipboard'));
+    }
+
+    function exportAllLogs() {
+        window.location.href = `/api/missions/${MISSION_ID}/activity_log/export`;
+    }
+
+    // ════════════════════════════════════════
+    // Scan control
+    // ════════════════════════════════════════
+    async function cancelScan(id) {
+        if (!confirm(`Cancel scan #${id}?`)) return;
+        const res = await fetch(`/api/scans/${id}/cancel`, { method: 'POST' });
+        if (res.ok) {
+            showToast(`Scan #${id} cancelled`);
+            loadScans();
+        } else {
+            const err = await res.json();
+            showToast(err.error || 'Cancel failed');
+        }
+    }
+
+    // ════════════════════════════════════════
+    // Socket.IO
+    // ════════════════════════════════════════
+    socket.on('connect', () => socket.emit('join_mission', { mission_id: MISSION_ID }));
+
+    socket.on('scan_progress', data => {
+        scanProgress[data.scan_id] = data;
+        const bar = document.getElementById(`pbar-${data.scan_id}`);
+        const msg = document.getElementById(`pmsg-${data.scan_id}`);
+        if (bar) bar.style.width = `${data.progress}%`;
+        if (msg) msg.textContent = data.message || '';
+    });
+
+    socket.on('scan_status', async data => {
+        // Status change is structural — fetch fresh data and do full rebuild
+        const res = await fetch(`/api/missions/${MISSION_ID}/scans`);
+        knownScans = await res.json();
+        renderJobsFull();
+        if (data.status === 'completed') {
+            showToast(`Scan #${data.scan_id} completed`);
+            loadDiscoveredTargets();
+        }
+        else if (data.status === 'failed') showToast(`Scan #${data.scan_id} failed`);
+        else if (data.status === 'cancelled') showToast(`Scan #${data.scan_id} cancelled`);
+    });
+
+    socket.on('scan_log', data => {
+        appendLogEntry(data.scan_id, data);
+    });
+
+    // ════════════════════════════════════════
+    // Load existing log data on page load
+    // ════════════════════════════════════════
+    async function loadExistingLogs() {
+        const res = await fetch(`/api/missions/${MISSION_ID}/activity_log?limit=5000`);
+        const entries = await res.json();
+        // Group by scan_id
+        entries.forEach(e => {
+            const sid = e.scan_id;
+            if (!scanLogs[sid]) scanLogs[sid] = [];
+            scanLogs[sid].push(e);
+        });
+        // Re-render any open consoles
+        Object.keys(scanLogs).forEach(sid => renderConsole(parseInt(sid)));
+    }
+
+    // ════════════════════════════════════════
+    // Utils
+    // ════════════════════════════════════════
+    function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function fmtTime(t) { if (!t) return ''; try { return new Date(t+'Z').toLocaleString(); } catch(e) { return t; } }
+    function showToast(msg) {
+        const t = document.getElementById('copyToast'); t.textContent = msg;
+        t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500);
+    }
+
+    // ════════════════════════════════════════
+    // Target Picker — select from discovered hosts/subnets
+    // ════════════════════════════════════════
+    let pickerHosts = [];
+    let pickerSubnets = [];
+    let pickerOpen = false;
+
+    async function loadDiscoveredTargets() {
+        try {
+            const [hRes, sRes] = await Promise.all([
+                fetch(`/api/missions/${MISSION_ID}/hosts`),
+                fetch(`/api/missions/${MISSION_ID}/subnets`)
+            ]);
+            pickerHosts = await hRes.json();
+            pickerSubnets = await sRes.json();
+        } catch(e) { pickerHosts = []; pickerSubnets = []; }
+    }
+
+    function toggleTargetPicker() {
+        const dd = document.getElementById('targetDropdown');
+        const btn = document.getElementById('pickerBtn');
+        pickerOpen = !pickerOpen;
+        if (pickerOpen) {
+            btn.classList.add('active');
+            buildTargetPicker();
+            dd.classList.add('open');
+        } else {
+            btn.classList.remove('active');
+            dd.classList.remove('open');
+        }
+    }
+
+    function buildTargetPicker() {
+        const dd = document.getElementById('targetDropdown');
+        const hasData = pickerHosts.length > 0 || pickerSubnets.length > 0;
+
+        if (!hasData) {
+            dd.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">No discovered hosts or subnets yet.<br>Run a Host Discovery or load demo data first.</div>';
+            return;
+        }
+
+        // Parse what's already in the target field to pre-check items
+        const currentTargets = new Set(document.getElementById('scanTarget').value.split(',').map(s => s.trim()).filter(Boolean));
+
+        // Device type color map
+        const typeColors = {
+            dc:'#f59e0b', server:'#0ea5e9', workstation:'#64748b', plc:'#ef4444',
+            hmi:'#f97316', rtu:'#ec4899', scada:'#a855f7', firewall:'#10b981',
+            router:'#06b6d4', switch:'#3b82f6', unknown:'#475569', printer:'#64748b'
+        };
+        const critColors = { critical:'#dc2626', high:'#f59e0b', medium:'#eab308', low:'#64748b' };
+
+        let html = '';
+
+        // Quick-select groups
+        html += '<div class="td-quick-group">';
+        html += '<span style="font-size:9px;color:var(--text-muted);font-family:\'JetBrains Mono\',monospace;align-self:center;">Quick:</span>';
+        html += '<button class="td-quick-btn" onclick="pickerQuickSelect(\'all\')">All Hosts</button>';
+        if (pickerSubnets.length) html += '<button class="td-quick-btn" onclick="pickerQuickSelect(\'subnets\')">All Subnets</button>';
+
+        // Check if we have OT/critical/alive groups
+        const otHosts = pickerHosts.filter(h => ['plc','hmi','rtu','scada'].includes((h.device_type||'').toLowerCase()));
+        const critHosts = pickerHosts.filter(h => h.criticality === 'critical');
+        const aliveHosts = pickerHosts.filter(h => h.is_alive);
+        const serverHosts = pickerHosts.filter(h => ['server','dc'].includes((h.device_type||'').toLowerCase()));
+
+        if (otHosts.length) html += `<button class="td-quick-btn" style="color:var(--accent-red);border-color:rgba(239,68,68,0.3);" onclick="pickerQuickSelect('ot')">OT Devices (${otHosts.length})</button>`;
+        if (critHosts.length) html += `<button class="td-quick-btn" style="color:#dc2626;border-color:rgba(220,38,38,0.3);" onclick="pickerQuickSelect('critical')">Critical (${critHosts.length})</button>`;
+        if (serverHosts.length) html += `<button class="td-quick-btn" onclick="pickerQuickSelect('servers')">Servers/DCs (${serverHosts.length})</button>`;
+        if (aliveHosts.length && aliveHosts.length < pickerHosts.length) html += `<button class="td-quick-btn" onclick="pickerQuickSelect('alive')">Alive Only (${aliveHosts.length})</button>`;
+        html += '<button class="td-quick-btn" onclick="pickerQuickSelect(\'clear\')">Clear</button>';
+        html += '</div>';
+
+        // Subnets section
+        if (pickerSubnets.length) {
+            html += '<div class="td-section-title">Subnets</div>';
+            pickerSubnets.forEach(s => {
+                const checked = currentTargets.has(s.cidr) ? 'checked' : '';
+                const ntBadge = s.network_type ? `<span class="td-item-badge" style="background:rgba(14,165,233,0.15);color:var(--accent-blue);">${s.network_type}</span>` : '';
+                html += `<div class="td-item" onclick="pickerToggle(this)">
+                    <input type="checkbox" data-value="${s.cidr}" data-kind="subnet" ${checked}>
+                    <span class="td-item-ip">${s.cidr}</span>
+                    <span class="td-item-info">${s.name || ''}</span>
+                    ${ntBadge}
+                </div>`;
+            });
+        }
+
+        // Hosts section — group by subnet
+        const hostsBySubnet = {};
+        pickerHosts.forEach(h => {
+            const sid = h.subnet_id || 0;
+            if (!hostsBySubnet[sid]) hostsBySubnet[sid] = [];
+            hostsBySubnet[sid].push(h);
+        });
+
+        // Build subnet name lookup
+        const subnetNames = {};
+        pickerSubnets.forEach(s => { subnetNames[s.id] = s.name || s.cidr; });
+
+        const sortedGroups = Object.entries(hostsBySubnet).sort((a,b) => {
+            const na = subnetNames[a[0]] || 'Ungrouped';
+            const nb = subnetNames[b[0]] || 'Ungrouped';
+            return na.localeCompare(nb);
+        });
+
+        sortedGroups.forEach(([sid, hosts]) => {
+            const groupName = subnetNames[sid] || (sid == 0 ? 'Ungrouped' : `Subnet #${sid}`);
+            html += `<div class="td-section-title">${esc(groupName)} (${hosts.length} hosts)</div>`;
+            hosts.sort((a,b) => (a.ip_address||'').localeCompare(b.ip_address||'', undefined, {numeric:true}));
+            hosts.forEach(h => {
+                const checked = currentTargets.has(h.ip_address) ? 'checked' : '';
+                const dt = (h.device_type || 'unknown').toLowerCase();
+                const tc = typeColors[dt] || '#475569';
+                const cc = critColors[h.criticality] || '#64748b';
+                const label = [h.hostname, h.os_name].filter(Boolean).join(' · ');
+                html += `<div class="td-item" onclick="pickerToggle(this)">
+                    <input type="checkbox" data-value="${h.ip_address}" data-kind="host" data-type="${dt}" data-crit="${h.criticality||''}" data-alive="${h.is_alive?1:0}" ${checked}>
+                    <span class="td-item-ip">${h.ip_address}</span>
+                    <span class="td-item-badge" style="background:${tc}22;color:${tc};">${dt}</span>
+                    <span class="td-item-info">${esc(label)}</span>
+                    <span class="td-item-badge" style="background:${cc}22;color:${cc};margin-left:auto;">${h.criticality||'?'}</span>
+                </div>`;
+            });
+        });
+
+        // Apply bar
+        html += `<div class="td-apply-row">
+            <button class="btn btn-primary" style="flex:1;font-size:11px;padding:5px 0;" onclick="applyPickerSelection()">Apply Selection</button>
+            <button class="console-btn" style="font-size:10px;" onclick="toggleTargetPicker()">Close</button>
+        </div>`;
+
+        dd.innerHTML = html;
+    }
+
+    function pickerToggle(row) {
+        const cb = row.querySelector('input[type="checkbox"]');
+        if (cb) cb.checked = !cb.checked;
+    }
+
+    function pickerQuickSelect(group) {
+        const dd = document.getElementById('targetDropdown');
+        const checks = dd.querySelectorAll('input[type="checkbox"]');
+        checks.forEach(cb => {
+            const kind = cb.dataset.kind;
+            const dtype = cb.dataset.type;
+            const crit = cb.dataset.crit;
+            const alive = cb.dataset.alive === '1';
+
+            switch(group) {
+                case 'all':
+                    if (kind === 'host') cb.checked = true;
+                    break;
+                case 'subnets':
+                    if (kind === 'subnet') cb.checked = true;
+                    break;
+                case 'ot':
+                    if (kind === 'host' && ['plc','hmi','rtu','scada'].includes(dtype)) cb.checked = true;
+                    else if (kind === 'host') cb.checked = false;
+                    if (kind === 'subnet') cb.checked = false;
+                    break;
+                case 'critical':
+                    if (kind === 'host' && crit === 'critical') cb.checked = true;
+                    else if (kind === 'host') cb.checked = false;
+                    if (kind === 'subnet') cb.checked = false;
+                    break;
+                case 'servers':
+                    if (kind === 'host' && ['server','dc'].includes(dtype)) cb.checked = true;
+                    else if (kind === 'host') cb.checked = false;
+                    if (kind === 'subnet') cb.checked = false;
+                    break;
+                case 'alive':
+                    if (kind === 'host' && alive) cb.checked = true;
+                    else if (kind === 'host') cb.checked = false;
+                    if (kind === 'subnet') cb.checked = false;
+                    break;
+                case 'clear':
+                    cb.checked = false;
+                    break;
+            }
+        });
+    }
+
+    function applyPickerSelection() {
+        const dd = document.getElementById('targetDropdown');
+        const selected = [];
+        dd.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+            selected.push(cb.dataset.value);
+        });
+        document.getElementById('scanTarget').value = selected.join(',');
+        toggleTargetPicker();
+    }
+
+    // Init
+    buildScanTypes();
+    loadScans().then(() => loadExistingLogs());
+    loadDiscoveredTargets();
+    setInterval(loadScans, 8000);
+    </script>
+</body>
+</html>

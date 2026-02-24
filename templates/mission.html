@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPT RECON // Mission</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-left">
+            <div class="nav-logo">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#0ea5e9" stroke-width="1.5"><circle cx="12" cy="12" r="10" opacity="0.4"/><circle cx="12" cy="12" r="3"/></svg>
+                <a href="/" style="text-decoration:none;"><span class="nav-title">CPT RECON</span></a>
+            </div>
+            <div class="nav-breadcrumb" id="missionBreadcrumb">Loading...</div>
+        </div>
+        <div class="nav-right">
+            <div class="nav-operator"><span class="operator-dot"></span><span>{{ session.get('operator', 'Operator') }}</span></div>
+            <a href="/logout" class="nav-btn-logout">Logout</a>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div>
+                <h1 id="missionTitle" style="font-size:20px;font-weight:600;margin-bottom:4px;"></h1>
+                <div style="display:flex;gap:12px;align-items:center;">
+                    <span class="mission-type-badge" id="missionTypeBadge"></span>
+                    <span class="classification-tag" id="missionClassTag"></span>
+                    <span id="missionDesc" style="font-size:12px;color:var(--text-muted);max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <a id="topoLink" class="btn btn-primary" href="#">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><line x1="8.5" y1="7.5" x2="15.5" y2="16.5"/></svg>
+                    Network Topology
+                </a>
+                <a id="scanLink" class="btn btn-primary" href="#" style="background:linear-gradient(135deg, #10b981, #06b6d4);">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    Scan Control
+                </a>
+                <button class="btn btn-secondary" onclick="exportMission()">Export</button>
+            </div>
+        </div>
+
+        <div class="stats-row" id="missionStats"></div>
+
+        <div class="tab-bar" id="tabBar">
+            <div class="tab-item active" data-tab="hosts">Hosts</div>
+            <div class="tab-item" data-tab="subnets">Subnets</div>
+            <div class="tab-item" data-tab="connections">Connections</div>
+            <div class="tab-item" data-tab="scans">Scan Control</div>
+            <div class="tab-item" data-tab="intel">Threat Intel</div>
+            <div class="tab-item" data-tab="hypotheses">Hunt Hypotheses</div>
+        </div>
+
+        <div id="tab-hosts" class="tab-panel"></div>
+        <div id="tab-subnets" class="tab-panel" style="display:none;"></div>
+        <div id="tab-connections" class="tab-panel" style="display:none;"></div>
+        <div id="tab-scans" class="tab-panel" style="display:none;"></div>
+        <div id="tab-intel" class="tab-panel" style="display:none;"></div>
+        <div id="tab-hypotheses" class="tab-panel" style="display:none;"></div>
+    </main>
+
+    <!-- Host Detail Modal -->
+    <div class="modal-overlay" id="hostDetailModal" style="display:none;">
+        <div class="modal" style="width:700px;max-height:85vh;overflow-y:auto;">
+            <div class="modal-header">
+                <h3 id="hostDetailTitle">Host Details</h3>
+                <button class="modal-close" onclick="closeModal('hostDetailModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="hostDetailBody"></div>
+        </div>
+    </div>
+
+    <script>
+    const MISSION_ID = {{ mission_id }};
+    let allHosts = [];
+    let allSubnets = [];
+    let allConnections = [];
+
+    // ── Device type config ──
+    const DEVICE_COLORS = {
+        dc:'#f59e0b', server:'#0ea5e9', workstation:'#64748b', plc:'#ef4444',
+        hmi:'#f97316', rtu:'#ec4899', scada:'#a855f7', firewall:'#10b981',
+        router:'#06b6d4', switch:'#3b82f6', printer:'#6b7280', iot:'#8b5cf6', unknown:'#475569'
+    };
+
+    const DEVICE_LABELS = {
+        dc:'Domain Controller', server:'Server', workstation:'Workstation', plc:'PLC',
+        hmi:'HMI', rtu:'RTU', scada:'SCADA', firewall:'Firewall', router:'Router',
+        switch:'Switch', printer:'Printer', iot:'IoT Device', unknown:'Unknown'
+    };
+
+    // ── Init ──
+    async function init() {
+        const mission = await fetchJSON(`/api/missions/${MISSION_ID}`);
+        document.getElementById('missionTitle').textContent = mission.name;
+        document.getElementById('missionBreadcrumb').textContent = mission.name;
+        document.getElementById('missionDesc').textContent = mission.description || '';
+        document.getElementById('topoLink').href = `/mission/${MISSION_ID}/topology`;
+        document.getElementById('scanLink').href = `/mission/${MISSION_ID}/scans`;
+
+        const typeBadge = document.getElementById('missionTypeBadge');
+        typeBadge.textContent = mission.network_type;
+        typeBadge.className = `mission-type-badge type-${mission.network_type.toLowerCase().replace('hybrid','hybrid')}`;
+
+        document.getElementById('missionClassTag').textContent = mission.classification;
+
+        await loadStats();
+        await loadHosts();
+        await loadSubnets();
+        await loadConnections();
+        await loadIntel();
+        await loadHypotheses();
+        await loadScans();
+        initTabs();
+    }
+
+    // ── Tabs ──
+    function initTabs() {
+        document.querySelectorAll('.tab-item').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+                tab.classList.add('active');
+                document.getElementById(`tab-${tab.dataset.tab}`).style.display = 'block';
+            });
+        });
+    }
+
+    // ── Stats ──
+    async function loadStats() {
+        const stats = await fetchJSON(`/api/missions/${MISSION_ID}/stats`);
+        document.getElementById('missionStats').innerHTML = `
+            <div class="stat-card"><div class="stat-value">${stats.hosts.total}</div><div class="stat-label">Hosts Discovered</div></div>
+            <div class="stat-card"><div class="stat-value">${stats.hosts.alive}</div><div class="stat-label">Hosts Alive</div></div>
+            <div class="stat-card"><div class="stat-value">${stats.services.total}</div><div class="stat-label">Open Services</div></div>
+            <div class="stat-card"><div class="stat-value" style="color:var(--accent-red)">${stats.services.ot_protocols}</div><div class="stat-label">OT Protocols</div></div>
+            <div class="stat-card"><div class="stat-value">${stats.subnets}</div><div class="stat-label">Subnets</div></div>
+            <div class="stat-card"><div class="stat-value">${stats.connections}</div><div class="stat-label">Connections</div></div>
+        `;
+    }
+
+    // ── Hosts ──
+    async function loadHosts() {
+        allHosts = await fetchJSON(`/api/missions/${MISSION_ID}/hosts`);
+        const container = document.getElementById('tab-hosts');
+
+        // Filter bar
+        let html = `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+            <input type="text" class="form-input" style="max-width:250px;padding:6px 12px;font-size:12px;" placeholder="Filter hosts..." id="hostFilter" oninput="filterHosts()">
+            <select class="form-input" style="max-width:150px;padding:6px 12px;font-size:12px;" id="typeFilter" onchange="filterHosts()">
+                <option value="">All Types</option>
+                ${[...new Set(allHosts.map(h=>h.device_type))].filter(Boolean).map(t=>`<option value="${t}">${DEVICE_LABELS[t]||t}</option>`).join('')}
+            </select>
+            <select class="form-input" style="max-width:150px;padding:6px 12px;font-size:12px;" id="critFilter" onchange="filterHosts()">
+                <option value="">All Criticality</option>
+                <option value="critical">Critical</option><option value="high">High</option>
+                <option value="medium">Medium</option><option value="low">Low</option>
+            </select>
+            <select class="form-input" style="max-width:150px;padding:6px 12px;font-size:12px;" id="subnetFilter" onchange="filterHosts()">
+                <option value="">All Subnets</option>
+                ${[...new Set(allHosts.map(h=>h.subnet_cidr))].filter(Boolean).map(s=>`<option value="${s}">${s}</option>`).join('')}
+            </select>
+        </div>`;
+
+        html += `<div class="panel"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+            <th>IP Address</th><th>Hostname</th><th>Type</th><th>OS</th><th>Subnet</th>
+            <th>Services</th><th>Criticality</th><th>Vendor</th>
+        </tr></thead><tbody id="hostsTableBody">`;
+
+        html += renderHostRows(allHosts);
+        html += `</tbody></table></div></div>`;
+        container.innerHTML = html;
+    }
+
+    function renderHostRows(hosts) {
+        return hosts.map(h => {
+            const color = DEVICE_COLORS[h.device_type] || DEVICE_COLORS.unknown;
+            const critClass = `crit-${h.criticality || 'medium'}`;
+            return `<tr onclick="showHostDetail(${h.id})">
+                <td style="color:var(--text-bright);font-weight:500;">${h.ip_address}</td>
+                <td>${h.hostname || '<span style="color:var(--text-muted)">—</span>'}</td>
+                <td><span class="device-icon" style="background:${color}"></span>${DEVICE_LABELS[h.device_type]||h.device_type||'Unknown'}</td>
+                <td>${h.os_name ? `${h.os_name} ${h.os_version||''}` : '<span style="color:var(--text-muted)">—</span>'}</td>
+                <td style="font-size:11px;">${h.subnet_cidr || '—'}</td>
+                <td><span class="badge badge-blue">${h.service_count || 0}</span></td>
+                <td><span class="crit-badge ${critClass}">${h.criticality || 'medium'}</span></td>
+                <td style="font-size:11px;color:var(--text-muted);">${h.device_vendor || '—'}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    function filterHosts() {
+        const text = document.getElementById('hostFilter').value.toLowerCase();
+        const type = document.getElementById('typeFilter').value;
+        const crit = document.getElementById('critFilter').value;
+        const subnet = document.getElementById('subnetFilter').value;
+
+        const filtered = allHosts.filter(h => {
+            if (text && !`${h.ip_address} ${h.hostname} ${h.os_name} ${h.device_vendor}`.toLowerCase().includes(text)) return false;
+            if (type && h.device_type !== type) return false;
+            if (crit && h.criticality !== crit) return false;
+            if (subnet && h.subnet_cidr !== subnet) return false;
+            return true;
+        });
+        document.getElementById('hostsTableBody').innerHTML = renderHostRows(filtered);
+    }
+
+    // ── Host Detail ──
+    async function showHostDetail(hostId) {
+        const data = await fetchJSON(`/api/hosts/${hostId}`);
+        const h = data.host;
+        const color = DEVICE_COLORS[h.device_type] || DEVICE_COLORS.unknown;
+
+        document.getElementById('hostDetailTitle').innerHTML = `
+            <span class="device-icon" style="background:${color};width:10px;height:10px;"></span>
+            ${h.hostname || h.ip_address}`;
+
+        let html = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+            <div class="panel" style="padding:14px;">
+                <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Network Info</div>
+                ${detailRow('IP Address', h.ip_address)}
+                ${detailRow('MAC Address', h.mac_address)}
+                ${detailRow('Hostname', h.hostname)}
+                ${detailRow('Domain', h.domain)}
+                ${detailRow('Subnet', h.subnet_id)}
+            </div>
+            <div class="panel" style="padding:14px;">
+                <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Device Info</div>
+                ${detailRow('OS', h.os_name ? `${h.os_name} ${h.os_version||''}` : null)}
+                ${detailRow('Type', DEVICE_LABELS[h.device_type]||h.device_type)}
+                ${detailRow('Vendor', h.device_vendor)}
+                ${detailRow('Model', h.device_model)}
+                ${detailRow('Firmware', h.firmware_version)}
+                ${detailRow('Criticality', `<span class="crit-badge crit-${h.criticality}">${h.criticality}</span>`)}
+            </div>
+        </div>`;
+
+        // Services
+        if (data.services.length > 0) {
+            html += `<div class="panel" style="margin-bottom:16px;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">
+                    Open Services (${data.services.length})
+                </div>
+                <table class="data-table"><thead><tr><th>Port</th><th>Proto</th><th>Service</th><th>Version</th><th>OT</th></tr></thead><tbody>
+                ${data.services.map(s => `<tr>
+                    <td style="color:var(--accent-cyan);font-weight:500;">${s.port}</td>
+                    <td>${s.protocol}</td>
+                    <td>${s.service_name || '—'}</td>
+                    <td style="font-size:11px;">${s.service_version || '—'}</td>
+                    <td>${s.is_ot_protocol ? `<span class="badge badge-red">${s.ot_protocol_name}</span>` : ''}</td>
+                </tr>`).join('')}
+                </tbody></table>
+            </div>`;
+        }
+
+        // OT Device Info
+        if (data.ot_device) {
+            const o = data.ot_device;
+            html += `<div class="panel" style="margin-bottom:16px;border-color:rgba(239,68,68,0.3);">
+                <div style="padding:10px 14px;border-bottom:1px solid rgba(239,68,68,0.2);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent-red);text-transform:uppercase;letter-spacing:1px;">
+                    OT Device Details
+                </div>
+                <div style="padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                    ${detailRow('Device Class', o.device_class)}
+                    ${detailRow('Vendor', o.vendor)}
+                    ${detailRow('Model', o.model)}
+                    ${detailRow('Firmware', o.firmware)}
+                    ${detailRow('Serial', o.serial_number)}
+                    ${detailRow('Protocol', o.protocol)}
+                    ${detailRow('Role', o.master_slave_role)}
+                </div>
+            </div>`;
+        }
+
+        // Connections
+        if (data.connections.length > 0) {
+            html += `<div class="panel">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">
+                    Network Connections (${data.connections.length})
+                </div>
+                <table class="data-table"><thead><tr><th>Direction</th><th>Remote Host</th><th>Port</th><th>Protocol</th><th>Packets</th></tr></thead><tbody>
+                ${data.connections.map(c => {
+                    const isSource = c.src_host_id === h.id;
+                    const remoteId = isSource ? c.dst_host_id : c.src_host_id;
+                    const remoteIp = isSource ? (c.dst_ip || '?') : (c.src_ip || '?');
+                    return `<tr>
+                        <td>${isSource ? '<span style="color:var(--accent-cyan)">→ OUT</span>' : '<span style="color:var(--accent-amber)">← IN</span>'}</td>
+                        <td style="color:var(--text-bright);">${remoteIp}</td>
+                        <td>${c.dst_port || '—'}</td>
+                        <td>${c.protocol || '—'}</td>
+                        <td>${c.packet_count || 0}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody></table>
+            </div>`;
+        }
+
+        document.getElementById('hostDetailBody').innerHTML = html;
+        document.getElementById('hostDetailModal').style.display = 'flex';
+    }
+
+    function detailRow(label, value) {
+        return `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;">
+            <span style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:11px;">${label}</span>
+            <span style="color:var(--text-primary);">${value || '<span style="color:var(--text-muted)">—</span>'}</span>
+        </div>`;
+    }
+
+    // ── Subnets ──
+    async function loadSubnets() {
+        allSubnets = await fetchJSON(`/api/missions/${MISSION_ID}/subnets`);
+        const netColors = { IT:'var(--color-it)', OT:'var(--color-ot)', DMZ:'var(--color-dmz)', Management:'var(--color-mgmt)' };
+        document.getElementById('tab-subnets').innerHTML = `
+            <div class="panel"><table class="data-table"><thead><tr>
+                <th>CIDR</th><th>Name</th><th>Type</th><th>VLAN</th><th>Gateway</th><th>Hosts</th><th>Discovery</th>
+            </tr></thead><tbody>
+            ${allSubnets.map(s => `<tr>
+                <td style="color:var(--text-bright);font-weight:500;">${s.cidr}</td>
+                <td>${s.name || '—'}</td>
+                <td><span style="color:${netColors[s.network_type]||'var(--text-muted)'}">${s.network_type}</span></td>
+                <td>${s.vlan_id || '—'}</td>
+                <td>${s.gateway || '—'}</td>
+                <td><span class="badge badge-blue">${s.host_count || 0}</span></td>
+                <td style="font-size:11px;color:var(--text-muted);">${s.discovered_via}</td>
+            </tr>`).join('')}
+            </tbody></table></div>`;
+    }
+
+    // ── Connections ──
+    async function loadConnections() {
+        allConnections = await fetchJSON(`/api/missions/${MISSION_ID}/connections`);
+        document.getElementById('tab-connections').innerHTML = `
+            <div class="panel"><table class="data-table"><thead><tr>
+                <th>Source</th><th>Destination</th><th>Port</th><th>Protocol</th><th>Packets</th><th>Bytes</th>
+            </tr></thead><tbody>
+            ${allConnections.map(c => {
+                const srcLabel = c.src_hostname ? `${c.src_hostname} (${c.src_ip_resolved})` : c.src_ip_resolved || '?';
+                const dstLabel = c.dst_hostname ? `${c.dst_hostname} (${c.dst_ip_resolved})` : c.dst_ip_resolved || '?';
+                const total = (c.bytes_sent||0) + (c.bytes_recv||0);
+                return `<tr>
+                    <td style="color:var(--text-bright);">${srcLabel}</td>
+                    <td style="color:var(--text-bright);">${dstLabel}</td>
+                    <td style="color:var(--accent-cyan);">${c.dst_port || '—'}</td>
+                    <td>${c.protocol || '—'}</td>
+                    <td>${(c.packet_count||0).toLocaleString()}</td>
+                    <td style="font-size:11px;">${formatBytes(total)}</td>
+                </tr>`;
+            }).join('')}
+            </tbody></table></div>`;
+    }
+
+    // ── Threat Intel ──
+    async function loadIntel() {
+        const intel = await fetchJSON(`/api/missions/${MISSION_ID}/threat_intel`);
+        if (intel.length === 0) {
+            document.getElementById('tab-intel').innerHTML = '<div class="empty-state" style="padding:40px;">No threat intelligence imported for this mission.</div>';
+            return;
+        }
+        document.getElementById('tab-intel').innerHTML = intel.map(i => {
+            const ttps = JSON.parse(i.ttps || '[]');
+            const iocs = JSON.parse(i.iocs || '[]');
+            return `<div class="panel" style="margin-bottom:16px;">
+                <div class="panel-header">
+                    <div class="panel-title" style="color:var(--accent-red);">${i.threat_actor || 'Unknown Actor'}</div>
+                    <div style="font-size:11px;color:var(--text-muted);">${i.source || ''}</div>
+                </div>
+                <div class="panel-body">
+                    <p style="color:var(--text-secondary);font-size:13px;line-height:1.6;margin-bottom:16px;">${i.description || ''}</p>
+                    ${ttps.length ? `<div style="margin-bottom:12px;">
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">MITRE ATT&CK TTPs</div>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                            ${ttps.map(t => `<span class="badge badge-red">${t}</span>`).join('')}
+                        </div>
+                    </div>` : ''}
+                    ${iocs.length ? `<div>
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Indicators of Compromise</div>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                            ${iocs.map(ioc => `<code style="background:var(--bg-primary);padding:3px 8px;border-radius:4px;font-size:11px;color:var(--accent-amber);border:1px solid var(--border-primary);">${ioc}</code>`).join('')}
+                        </div>
+                    </div>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // ── Hunt Hypotheses ──
+    async function loadHypotheses() {
+        const hyps = await fetchJSON(`/api/missions/${MISSION_ID}/hypotheses`);
+        if (hyps.length === 0) {
+            document.getElementById('tab-hypotheses').innerHTML = '<div class="empty-state" style="padding:40px;">No hunt hypotheses generated yet.</div>';
+            return;
+        }
+        const prioColors = { critical:'var(--crit-critical)', high:'var(--crit-high)', medium:'var(--crit-medium)', low:'var(--crit-low)' };
+        document.getElementById('tab-hypotheses').innerHTML = hyps.map(h => `
+            <div class="panel" style="margin-bottom:12px;border-left:3px solid ${prioColors[h.priority]||'var(--border-primary)'};">
+                <div style="padding:14px 18px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <span class="crit-badge crit-${h.priority}">${h.priority}</span>
+                            <span style="font-weight:600;font-size:14px;">${h.title}</span>
+                        </div>
+                        ${h.mitre_technique ? `<span class="badge badge-red">${h.mitre_technique}</span>` : ''}
+                    </div>
+                    <p style="color:var(--text-secondary);font-size:13px;line-height:1.5;">${h.description || ''}</p>
+                    <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+                        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;">Status:</span>
+                        <span class="badge badge-${h.status==='confirmed'?'red':h.status==='investigating'?'amber':'blue'}">${h.status}</span>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // ── Scan Control ──
+    async function loadScans() {
+        const scans = await fetchJSON(`/api/missions/${MISSION_ID}/scans`);
+        const statusColors = {running:'var(--accent-cyan)',completed:'var(--accent-green)',
+            failed:'var(--accent-red)',pending:'var(--text-muted)',cancelled:'var(--accent-amber)'};
+
+        let html = `
+        <div style="display:flex;gap:16px;margin-bottom:20px;">
+            <!-- Quick Scan Cards -->
+            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('full_active')">
+                <div class="panel-body" style="text-align:center;padding:20px;">
+                    <div style="font-size:24px;margin-bottom:8px;">🔍</div>
+                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Full Active Scan</div>
+                    <div style="font-size:11px;color:var(--text-muted);">Discovery → Ports → Services → OS → OT</div>
+                </div>
+            </div>
+            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('arp_sweep')">
+                <div class="panel-body" style="text-align:center;padding:20px;">
+                    <div style="font-size:24px;margin-bottom:8px;">📡</div>
+                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Host Discovery</div>
+                    <div style="font-size:11px;color:var(--text-muted);">ARP/ICMP sweep for live hosts</div>
+                </div>
+            </div>
+            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('port_scan')">
+                <div class="panel-body" style="text-align:center;padding:20px;">
+                    <div style="font-size:24px;margin-bottom:8px;">🔓</div>
+                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Port Scan</div>
+                    <div style="font-size:11px;color:var(--text-muted);">TCP/UDP port enumeration</div>
+                </div>
+            </div>
+            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('ot_scan')">
+                <div class="panel-body" style="text-align:center;padding:20px;">
+                    <div style="font-size:24px;margin-bottom:8px;">⚡</div>
+                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">OT/ICS Scan</div>
+                    <div style="font-size:11px;color:var(--text-muted);">Modbus, S7, DNP3, EtherNet/IP, BACnet</div>
+                </div>
+            </div>
+            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('passive_capture')">
+                <div class="panel-body" style="text-align:center;padding:20px;">
+                    <div style="font-size:24px;margin-bottom:8px;">👁️</div>
+                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Passive Capture</div>
+                    <div style="font-size:11px;color:var(--text-muted);">Zero-packet network observation</div>
+                </div>
+            </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:20px;">
+            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('ad_enum')">
+                <div class="panel-body" style="text-align:center;padding:14px;">
+                    <div style="font-weight:600;font-size:12px;">🏛️ AD Enumeration</div>
+                </div>
+            </div>
+            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('smb_enum')">
+                <div class="panel-body" style="text-align:center;padding:14px;">
+                    <div style="font-weight:600;font-size:12px;">📁 SMB Enumeration</div>
+                </div>
+            </div>
+            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('snmp_enum')">
+                <div class="panel-body" style="text-align:center;padding:14px;">
+                    <div style="font-weight:600;font-size:12px;">📊 SNMP Enumeration</div>
+                </div>
+            </div>
+            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('service_scan')">
+                <div class="panel-body" style="text-align:center;padding:14px;">
+                    <div style="font-weight:600;font-size:12px;">🏷️ Service Detection</div>
+                </div>
+            </div>
+            <div class="panel" style="flex:1;cursor:pointer;" onclick="launchScan('host_profile')">
+                <div class="panel-body" style="text-align:center;padding:14px;">
+                    <div style="font-weight:600;font-size:12px;">🖥️ Host Profiling</div>
+                </div>
+            </div>
+        </div>`;
+
+        // Scan history table
+        if (scans.length > 0) {
+            html += `<div class="panel"><div class="panel-header"><div class="panel-title">Scan History</div></div>
+            <table class="data-table"><thead><tr>
+                <th>ID</th><th>Type</th><th>Target</th><th>Mode</th><th>Level</th><th>Status</th><th>Started</th><th>Actions</th>
+            </tr></thead><tbody>
+            ${scans.map(s => {
+                const color = statusColors[s.status] || 'var(--text-muted)';
+                return `<tr>
+                    <td>#${s.id}</td>
+                    <td style="color:var(--text-bright);">${s.job_type}</td>
+                    <td style="font-size:11px;">${s.target || '—'}</td>
+                    <td>${s.mode}</td>
+                    <td>${s.aggressiveness}/5</td>
+                    <td><span style="color:${color};font-weight:500;">${s.status.toUpperCase()}</span></td>
+                    <td style="font-size:11px;color:var(--text-muted);">${s.started_at || s.created_at || '—'}</td>
+                    <td>
+                        ${s.status === 'running' ? `<button class="btn btn-xs btn-danger" onclick="stopScan(${s.id})">Stop</button>` : ''}
+                        ${s.status === 'pending' ? `<button class="btn btn-xs btn-primary" onclick="startScan(${s.id})">Start</button>` : ''}
+                    </td>
+                </tr>`;
+            }).join('')}
+            </tbody></table></div>`;
+        }
+
+        document.getElementById('tab-scans').innerHTML = html;
+    }
+
+    async function launchScan(jobType) {
+        const target = prompt('Enter target (CIDR, IP range, or comma-separated IPs):', '');
+        if (target === null) return;
+
+        let aggressiveness = 3;
+        if (['port_scan','full_active','ot_scan'].includes(jobType)) {
+            const level = prompt('Aggressiveness level (1=ultra-safe, 3=normal, 5=full):', '3');
+            if (level === null) return;
+            aggressiveness = parseInt(level) || 3;
+        }
+
+        const config = {};
+        if (['ad_enum','smb_enum','host_profile'].includes(jobType)) {
+            const user = prompt('Username (leave blank for null session):','');
+            if (user) {
+                config.credentials = {
+                    username: user,
+                    password: prompt('Password:','') || '',
+                    domain: prompt('Domain:','') || ''
+                };
+            }
+        }
+        if (jobType === 'passive_capture') {
+            config.interface = prompt('Interface:', 'eth0') || 'eth0';
+            config.duration = parseInt(prompt('Duration (seconds):', '300')) || 300;
+        }
+
+        const res = await fetch(`/api/missions/${MISSION_ID}/scans`, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                job_type: jobType, target: target,
+                aggressiveness: aggressiveness, config: config, auto_start: true
+            })
+        });
+
+        if (res.ok) {
+            const result = await res.json();
+            alert(`Scan #${result.id} started! Check Scan History for progress.`);
+            loadScans();
+        }
+    }
+
+    async function stopScan(scanId) {
+        await fetch(`/api/scans/${scanId}/stop`, { method: 'POST' });
+        setTimeout(loadScans, 1000);
+    }
+
+    async function startScan(scanId) {
+        await fetch(`/api/scans/${scanId}/start`, { method: 'POST' });
+        setTimeout(loadScans, 1000);
+    }
+
+    // ── Export ──
+    async function exportMission() {
+        const data = await fetchJSON(`/api/missions/${MISSION_ID}/export`);
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `mission_${MISSION_ID}_export.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // ── Helpers ──
+    async function fetchJSON(url) {
+        const res = await fetch(url);
+        return res.json();
+    }
+
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+    // Close modal on overlay click
+    document.addEventListener('click', (e) => {
+        if (e.target.classList.contains('modal-overlay')) e.target.style.display = 'none';
+    });
+
+    init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPT RECON // Mission Control</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Top nav bar -->
+    <nav class="top-nav">
+        <div class="nav-left">
+            <div class="nav-logo">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#0ea5e9" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="10" opacity="0.4"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6" opacity="0.5"/><line x1="12" y1="18" x2="12" y2="22" opacity="0.5"/>
+                </svg>
+                <span class="nav-title">CPT RECON</span>
+            </div>
+            <div class="nav-breadcrumb">Mission Control</div>
+        </div>
+        <div class="nav-right">
+            <div class="nav-operator">
+                <span class="operator-dot"></span>
+                <span id="operatorName">Operator</span>
+            </div>
+            <a href="/logout" class="nav-btn-logout">Logout</a>
+        </div>
+    </nav>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <!-- Stats row -->
+        <div class="stats-row" id="globalStats">
+            <div class="stat-card">
+                <div class="stat-value" id="statMissions">0</div>
+                <div class="stat-label">Active Missions</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statHosts">0</div>
+                <div class="stat-label">Total Hosts</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statSubnets">0</div>
+                <div class="stat-label">Subnets Mapped</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statScans">0</div>
+                <div class="stat-label">Scans Completed</div>
+            </div>
+        </div>
+
+        <!-- Action bar -->
+        <div class="action-bar">
+            <h2 class="section-title">Missions</h2>
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="seedDemo()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                    Load Demo Data
+                </button>
+                <button class="btn btn-primary" onclick="showNewMissionModal()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                    New Mission
+                </button>
+            </div>
+        </div>
+
+        <!-- Mission cards -->
+        <div class="mission-grid" id="missionGrid">
+            <div class="empty-state" id="emptyState">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#334155" stroke-width="1">
+                    <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
+                </svg>
+                <p>No missions yet. Create a new mission or load demo data to get started.</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- New Mission Modal -->
+    <div class="modal-overlay" id="newMissionModal" style="display:none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>New Mission</h3>
+                <button class="modal-close" onclick="closeModal('newMissionModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Mission Name</label>
+                    <input type="text" class="form-input" id="missionName" placeholder="e.g., Operation IRON SENTINEL">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-input form-textarea" id="missionDesc" placeholder="Mission objectives and scope..."></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label class="form-label">Network Type</label>
+                        <select class="form-input" id="missionNetType">
+                            <option value="IT">IT Network</option>
+                            <option value="OT">OT / ICS Network</option>
+                            <option value="Hybrid">Hybrid (IT/OT)</option>
+                        </select>
+                    </div>
+                    <div class="form-group flex-1">
+                        <label class="form-label">Classification</label>
+                        <select class="form-input" id="missionClassification">
+                            <option value="UNCLASSIFIED">UNCLASSIFIED</option>
+                            <option value="UNCLASSIFIED//FOUO">UNCLASSIFIED//FOUO</option>
+                            <option value="CUI">CUI</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('newMissionModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="createMission()">Create Mission</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ── Load missions ──
+        async function loadMissions() {
+            const res = await fetch('/api/missions');
+            const missions = await res.json();
+
+            let totalHosts = 0, totalSubnets = 0, totalScans = 0;
+
+            const grid = document.getElementById('missionGrid');
+            const empty = document.getElementById('emptyState');
+
+            if (missions.length === 0) {
+                empty.style.display = 'flex';
+                return;
+            }
+            empty.style.display = 'none';
+
+            grid.innerHTML = missions.map(m => {
+                totalHosts += m.host_count || 0;
+                totalSubnets += m.subnet_count || 0;
+                totalScans += m.scan_count || 0;
+
+                const typeClass = m.network_type === 'OT' ? 'type-ot' : m.network_type === 'Hybrid' ? 'type-hybrid' : 'type-it';
+
+                return `
+                <div class="mission-card" onclick="window.location='/mission/${m.id}'">
+                    <div class="mission-card-header">
+                        <div class="mission-type-badge ${typeClass}">${m.network_type}</div>
+                        <div class="mission-status status-${m.status}">${m.status}</div>
+                    </div>
+                    <h3 class="mission-name">${m.name}</h3>
+                    <p class="mission-desc">${m.description || 'No description'}</p>
+                    <div class="mission-meta">
+                        <div class="meta-item">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                            <span>${m.host_count || 0} hosts</span>
+                        </div>
+                        <div class="meta-item">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                            <span>${m.subnet_count || 0} subnets</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="classification-tag">${m.classification}</span>
+                        </div>
+                    </div>
+                    <div class="mission-date">Updated: ${new Date(m.updated_at).toLocaleDateString()}</div>
+                </div>`;
+            }).join('');
+
+            document.getElementById('statMissions').textContent = missions.filter(m => m.status === 'active').length;
+            document.getElementById('statHosts').textContent = totalHosts;
+            document.getElementById('statSubnets').textContent = totalSubnets;
+            document.getElementById('statScans').textContent = totalScans;
+        }
+
+        // ── Create mission ──
+        async function createMission() {
+            const data = {
+                name: document.getElementById('missionName').value,
+                description: document.getElementById('missionDesc').value,
+                network_type: document.getElementById('missionNetType').value,
+                classification: document.getElementById('missionClassification').value
+            };
+            if (!data.name) return alert('Mission name required');
+            const res = await fetch('/api/missions', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            if (res.ok) {
+                const result = await res.json();
+                closeModal('newMissionModal');
+                window.location = `/mission/${result.id}`;
+            }
+        }
+
+        // ── Seed demo data ──
+        async function seedDemo() {
+            const res = await fetch('/api/demo/seed', { method: 'POST' });
+            if (res.ok) {
+                const result = await res.json();
+                window.location = `/mission/${result.mission_id}`;
+            }
+        }
+
+        // ── Modal helpers ──
+        function showNewMissionModal() { document.getElementById('newMissionModal').style.display = 'flex'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+        // Init
+        loadMissions();
+    </script>
+</body>
+</html>

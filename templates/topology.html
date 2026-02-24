@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPT RECON // Network Topology</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        body { overflow: hidden; }
+        .main-content { padding: 0; margin-top: 52px; height: calc(100vh - 52px); display: flex; }
+
+        /* Sidebar */
+        .topo-sidebar {
+            width: 320px;
+            min-width: 320px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-primary);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .sidebar-section {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border-primary);
+        }
+        .sidebar-section-title {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+        }
+        .sidebar-scroll { flex: 1; overflow-y: auto; }
+
+        /* Legend items */
+        .legend-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 4px 0; font-size: 11px; color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .legend-dot {
+            width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+        }
+        .legend-line {
+            width: 20px; height: 2px; flex-shrink: 0;
+        }
+
+        /* Subnet legend */
+        .subnet-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 12px; margin-bottom: 4px; border-radius: 6px;
+            background: var(--bg-primary); border: 1px solid var(--border-primary);
+            cursor: pointer; transition: var(--transition);
+            font-family: 'JetBrains Mono', monospace; font-size: 11px;
+        }
+        .subnet-item:hover { border-color: var(--border-accent); }
+        .subnet-item.highlighted { border-color: var(--accent-blue); background: var(--bg-tertiary); }
+
+        /* Node info panel */
+        .node-info {
+            padding: 14px 16px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-primary);
+            border-radius: 6px;
+            margin: 8px 16px;
+        }
+        .node-info-title {
+            font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--text-bright);
+        }
+        .node-info-row {
+            display: flex; justify-content: space-between;
+            padding: 3px 0; font-size: 11px;
+        }
+        .node-info-label { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+        .node-info-value { color: var(--text-primary); }
+
+        /* Topology canvas area */
+        .topo-main { flex: 1; position: relative; background: var(--bg-primary); }
+
+        /* Controls */
+        .topo-controls {
+            position: absolute; top: 12px; right: 12px;
+            display: flex; flex-direction: column; gap: 4px; z-index: 100;
+        }
+        .topo-btn {
+            width: 36px; height: 36px;
+            background: var(--bg-secondary); border: 1px solid var(--border-primary);
+            border-radius: var(--radius); color: var(--text-secondary);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: var(--transition); font-size: 16px;
+        }
+        .topo-btn:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+
+        /* View mode toggle */
+        .view-toggle {
+            position: absolute; top: 12px; left: 12px;
+            display: flex; background: var(--bg-secondary);
+            border: 1px solid var(--border-primary); border-radius: var(--radius);
+            overflow: hidden; z-index: 100;
+        }
+        .view-toggle-btn {
+            padding: 8px 14px; font-family: 'JetBrains Mono', monospace;
+            font-size: 11px; color: var(--text-muted); cursor: pointer;
+            background: none; border: none; transition: var(--transition);
+        }
+        .view-toggle-btn.active { background: var(--accent-blue); color: #fff; }
+
+        /* Stats overlay */
+        .topo-stats {
+            position: absolute; bottom: 12px; left: 12px;
+            display: flex; gap: 8px; z-index: 100;
+        }
+        .topo-stat {
+            background: var(--bg-secondary); border: 1px solid var(--border-primary);
+            border-radius: var(--radius); padding: 8px 14px;
+            font-family: 'JetBrains Mono', monospace; font-size: 11px;
+        }
+        .topo-stat-val { color: var(--accent-blue); font-weight: 600; font-size: 16px; }
+        .topo-stat-label { color: var(--text-muted); font-size: 9px; text-transform: uppercase; letter-spacing: 1px; }
+
+        /* SVG styling */
+        .subnet-hull {
+            stroke-width: 1.5;
+            stroke-dasharray: 6 3;
+            fill-opacity: 0.04;
+            stroke-opacity: 0.4;
+        }
+        .subnet-hull:hover {
+            fill-opacity: 0.08;
+            stroke-opacity: 0.7;
+        }
+        .subnet-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            fill-opacity: 0.5;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .node-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            fill: #94a3b8;
+            pointer-events: none;
+            text-anchor: middle;
+        }
+        .link-line {
+            stroke-opacity: 0.25;
+            transition: stroke-opacity 0.2s;
+        }
+        .link-line:hover { stroke-opacity: 0.6; }
+        .link-line.highlighted { stroke-opacity: 0.8; }
+
+        /* Tooltip */
+        .topo-tooltip {
+            position: absolute; pointer-events: none; z-index: 200;
+            background: var(--bg-secondary); border: 1px solid var(--border-primary);
+            border-radius: var(--radius); padding: 10px 14px;
+            font-family: 'JetBrains Mono', monospace; font-size: 11px;
+            box-shadow: var(--shadow-lg); max-width: 280px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <div class="nav-left">
+            <div class="nav-logo">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#0ea5e9" stroke-width="1.5"><circle cx="12" cy="12" r="10" opacity="0.4"/><circle cx="12" cy="12" r="3"/></svg>
+                <a href="/" style="text-decoration:none;"><span class="nav-title">CPT RECON</span></a>
+            </div>
+            <a href="/mission/{{ mission_id }}" style="text-decoration:none;"><div class="nav-breadcrumb" id="breadcrumb">← Back to Mission</div></a>
+        </div>
+        <div class="nav-right">
+            <div class="nav-operator"><span class="operator-dot"></span><span>{{ session.get('operator', 'Operator') }}</span></div>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        <!-- Sidebar -->
+        <div class="topo-sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">Network Topology</div>
+                <input type="text" class="form-input" style="padding:6px 10px;font-size:11px;" placeholder="Search hosts..." id="topoSearch" oninput="searchNodes(this.value)">
+            </div>
+
+            <div class="sidebar-scroll">
+                <!-- Subnets -->
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Subnets / Zones</div>
+                    <div id="subnetList"></div>
+                </div>
+
+                <!-- Device Types Legend -->
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Device Types</div>
+                    <div id="deviceLegend"></div>
+                </div>
+
+                <!-- Connection Types -->
+                <div class="sidebar-section">
+                    <div class="sidebar-section-title">Connection Legend</div>
+                    <div class="legend-item">
+                        <div class="legend-line" style="background:var(--accent-blue);"></div>
+                        <span>IT Protocol</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-line" style="background:var(--accent-red);"></div>
+                        <span>OT Protocol</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-line" style="background:var(--accent-amber);height:2px;border-top:1px dashed var(--accent-amber);"></div>
+                        <span>Cross-Zone</span>
+                    </div>
+                </div>
+
+                <!-- Selected Node Info -->
+                <div id="selectedNodePanel" style="display:none;">
+                    <div class="sidebar-section">
+                        <div class="sidebar-section-title">Selected Host</div>
+                        <div id="selectedNodeInfo"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main topology canvas -->
+        <div class="topo-main" id="topoMain">
+            <div class="view-toggle">
+                <button class="view-toggle-btn active" data-layout="force" onclick="switchLayout('force')">Force</button>
+                <button class="view-toggle-btn" data-layout="grouped" onclick="switchLayout('grouped')">Grouped</button>
+                <button class="view-toggle-btn" data-layout="hierarchical" onclick="switchLayout('hierarchical')">Hierarchical</button>
+            </div>
+
+            <div class="topo-controls">
+                <button class="topo-btn" onclick="zoomIn()" title="Zoom In">+</button>
+                <button class="topo-btn" onclick="zoomOut()" title="Zoom Out">−</button>
+                <button class="topo-btn" onclick="resetZoom()" title="Reset View">⟲</button>
+                <button class="topo-btn" onclick="exportSVG()" title="Export SVG">↓</button>
+            </div>
+
+            <div class="topo-stats" id="topoStats"></div>
+
+            <svg id="topologySvg" width="100%" height="100%"></svg>
+            <div class="topo-tooltip" id="tooltip"></div>
+        </div>
+    </main>
+
+    <script>
+    const MISSION_ID = {{ mission_id }};
+
+    // ── Color configs ──
+    const DEVICE_COLORS = {
+        dc:'#f59e0b', server:'#0ea5e9', workstation:'#64748b', plc:'#ef4444',
+        hmi:'#f97316', rtu:'#ec4899', scada:'#a855f7', firewall:'#10b981',
+        router:'#06b6d4', switch:'#3b82f6', printer:'#6b7280', iot:'#8b5cf6', unknown:'#475569'
+    };
+    const DEVICE_LABELS = {
+        dc:'Domain Controller', server:'Server', workstation:'Workstation', plc:'PLC',
+        hmi:'HMI', rtu:'RTU', scada:'SCADA', firewall:'Firewall', router:'Router',
+        switch:'Switch', printer:'Printer', iot:'IoT Device', unknown:'Unknown'
+    };
+    const DEVICE_SIZES = {
+        dc:14, server:11, workstation:8, plc:12, hmi:11, rtu:12, scada:13,
+        firewall:13, router:12, switch:10, printer:6, iot:7, unknown:7
+    };
+    const SUBNET_COLORS = {
+        IT:'#0ea5e9', OT:'#ef4444', DMZ:'#f59e0b', Management:'#a855f7'
+    };
+    const OT_PORTS = [102, 502, 20000, 44818, 2222, 4840, 47808];
+    const CRIT_GLOW = { critical:12, high:8, medium:0, low:0 };
+
+    let topoData = null;
+    let simulation = null;
+    let svg, g, linkGroup, nodeGroup, hullGroup, labelGroup;
+    let zoomBehavior;
+    let currentLayout = 'force';
+    let selectedNode = null;
+    let width, height;
+
+    // ── Init ──
+    async function init() {
+        const container = document.getElementById('topoMain');
+        width = container.clientWidth;
+        height = container.clientHeight;
+
+        svg = d3.select('#topologySvg');
+        zoomBehavior = d3.zoom()
+            .scaleExtent([0.1, 8])
+            .on('zoom', (event) => g.attr('transform', event.transform));
+        svg.call(zoomBehavior);
+
+        // Main group for zoom/pan
+        g = svg.append('g');
+
+        // Layer ordering matters
+        hullGroup = g.append('g').attr('class', 'hulls');
+        linkGroup = g.append('g').attr('class', 'links');
+        nodeGroup = g.append('g').attr('class', 'nodes');
+        labelGroup = g.append('g').attr('class', 'labels');
+
+        // Grid background
+        const defs = svg.append('defs');
+        const pattern = defs.append('pattern')
+            .attr('id', 'grid').attr('width', 40).attr('height', 40)
+            .attr('patternUnits', 'userSpaceOnUse');
+        pattern.append('path')
+            .attr('d', 'M 40 0 L 0 0 0 40')
+            .attr('fill', 'none').attr('stroke', 'rgba(14,165,233,0.04)').attr('stroke-width', 0.5);
+        svg.insert('rect', ':first-child')
+            .attr('width', '100%').attr('height', '100%')
+            .attr('fill', 'url(#grid)');
+
+        // Glow filter
+        const filter = defs.append('filter').attr('id', 'glow');
+        filter.append('feGaussianBlur').attr('stdDeviation', '3').attr('result', 'coloredBlur');
+        const merge = filter.append('feMerge');
+        merge.append('feMergeNode').attr('in', 'coloredBlur');
+        merge.append('feMergeNode').attr('in', 'SourceGraphic');
+
+        // Load data
+        const res = await fetch(`/api/missions/${MISSION_ID}/topology`);
+        topoData = await res.json();
+
+        buildLegend();
+        buildSubnetList();
+        buildGraph();
+        updateStats();
+    }
+
+    // ── Build graph ──
+    function buildGraph() {
+        const nodes = topoData.nodes.map(n => ({...n}));
+        const edges = topoData.edges.filter(e => {
+            return nodes.find(n => n.id === e.source) && nodes.find(n => n.id === e.target);
+        }).map(e => ({...e}));
+
+        // ── Links ──
+        const links = linkGroup.selectAll('line').data(edges, d => `${d.source}-${d.target}`);
+        links.exit().remove();
+        const linksEnter = links.enter().append('line')
+            .attr('class', 'link-line')
+            .attr('stroke-width', d => Math.max(1, Math.min(4, Math.log(d.packet_count || 1) / 2)))
+            .attr('stroke', d => {
+                if (OT_PORTS.includes(d.dst_port)) return '#ef4444';
+                // Cross-zone detection
+                const src = nodes.find(n => n.id === (d.source.id || d.source));
+                const tgt = nodes.find(n => n.id === (d.target.id || d.target));
+                if (src && tgt && src.subnet_type !== tgt.subnet_type) return '#f59e0b';
+                return '#0ea5e9';
+            })
+            .attr('stroke-dasharray', d => {
+                const src = nodes.find(n => n.id === (d.source.id || d.source));
+                const tgt = nodes.find(n => n.id === (d.target.id || d.target));
+                if (src && tgt && src.subnet_type !== tgt.subnet_type) return '5,3';
+                return null;
+            });
+
+        // ── Nodes ──
+        const nodeSelection = nodeGroup.selectAll('g.node').data(nodes, d => d.id);
+        nodeSelection.exit().remove();
+
+        const nodeEnter = nodeSelection.enter().append('g')
+            .attr('class', 'node')
+            .style('cursor', 'pointer')
+            .call(d3.drag()
+                .on('start', dragStart)
+                .on('drag', dragging)
+                .on('end', dragEnd));
+
+        // Node shapes - use different shapes for different device types
+        nodeEnter.each(function(d) {
+            const el = d3.select(this);
+            const size = DEVICE_SIZES[d.device_type] || 7;
+            const color = DEVICE_COLORS[d.device_type] || DEVICE_COLORS.unknown;
+
+            // Glow for critical/high
+            if (d.criticality === 'critical' || d.criticality === 'high') {
+                el.append('circle')
+                    .attr('r', size + 6)
+                    .attr('fill', color)
+                    .attr('opacity', 0.15)
+                    .attr('class', 'glow-ring');
+            }
+
+            // OT devices get diamond shape
+            if (['plc', 'rtu', 'hmi', 'scada'].includes(d.device_type)) {
+                el.append('rect')
+                    .attr('width', size * 1.6).attr('height', size * 1.6)
+                    .attr('x', -size * 0.8).attr('y', -size * 0.8)
+                    .attr('transform', 'rotate(45)')
+                    .attr('fill', color).attr('fill-opacity', 0.2)
+                    .attr('stroke', color).attr('stroke-width', 1.5)
+                    .attr('rx', 2);
+                el.append('circle')
+                    .attr('r', size * 0.4)
+                    .attr('fill', color);
+            }
+            // DCs and firewalls get hexagon-ish (larger circle with ring)
+            else if (['dc', 'firewall'].includes(d.device_type)) {
+                el.append('circle')
+                    .attr('r', size)
+                    .attr('fill', color).attr('fill-opacity', 0.15)
+                    .attr('stroke', color).attr('stroke-width', 2);
+                el.append('circle')
+                    .attr('r', size * 0.5)
+                    .attr('fill', color);
+            }
+            // Default circle
+            else {
+                el.append('circle')
+                    .attr('r', size)
+                    .attr('fill', color).attr('fill-opacity', 0.2)
+                    .attr('stroke', color).attr('stroke-width', 1.5);
+                el.append('circle')
+                    .attr('r', size * 0.35)
+                    .attr('fill', color);
+            }
+        });
+
+        // Labels
+        const labelsSelection = labelGroup.selectAll('text.node-label').data(nodes, d => d.id);
+        labelsSelection.exit().remove();
+        labelsSelection.enter().append('text')
+            .attr('class', 'node-label')
+            .attr('dy', d => (DEVICE_SIZES[d.device_type] || 7) + 14)
+            .text(d => d.hostname || d.ip);
+
+        // Tooltip and click events
+        nodeGroup.selectAll('g.node')
+            .on('mouseover', function(event, d) { showTooltip(event, d); highlightConnections(d); })
+            .on('mouseout', function() { hideTooltip(); unhighlightAll(); })
+            .on('click', function(event, d) { selectNode(d); });
+
+        // ── Simulation ──
+        if (simulation) simulation.stop();
+
+        simulation = d3.forceSimulation(nodes)
+            .force('link', d3.forceLink(edges).id(d => d.id).distance(100).strength(0.5))
+            .force('charge', d3.forceManyBody().strength(-300))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            .force('collision', d3.forceCollide().radius(d => (DEVICE_SIZES[d.device_type] || 7) + 20))
+            .force('x', d3.forceX(width / 2).strength(0.03))
+            .force('y', d3.forceY(height / 2).strength(0.03));
+
+        // Subnet clustering force
+        if (currentLayout === 'grouped') {
+            applyGroupedLayout(nodes);
+        }
+
+        simulation.on('tick', () => {
+            linkGroup.selectAll('line')
+                .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+
+            nodeGroup.selectAll('g.node')
+                .attr('transform', d => `translate(${d.x},${d.y})`);
+
+            labelGroup.selectAll('text.node-label')
+                .attr('x', d => d.x).attr('y', d => d.y);
+
+            updateHulls(nodes);
+        });
+    }
+
+    // ── Subnet hulls ──
+    function updateHulls(nodes) {
+        const subnetGroups = {};
+        nodes.forEach(n => {
+            const key = n.subnet_cidr || 'unknown';
+            if (!subnetGroups[key]) subnetGroups[key] = [];
+            subnetGroups[key].push([n.x, n.y]);
+        });
+
+        const hullData = Object.entries(subnetGroups)
+            .filter(([k, points]) => points.length >= 3)
+            .map(([cidr, points]) => {
+                const subnet = topoData.subnets.find(s => s.cidr === cidr);
+                return {
+                    cidr,
+                    type: subnet ? subnet.type : 'IT',
+                    name: subnet ? subnet.name : cidr,
+                    hull: d3.polygonHull(points)
+                };
+            })
+            .filter(d => d.hull);
+
+        const hulls = hullGroup.selectAll('path.subnet-hull').data(hullData, d => d.cidr);
+        hulls.exit().remove();
+        hulls.enter().append('path')
+            .attr('class', 'subnet-hull')
+            .merge(hulls)
+            .attr('d', d => {
+                // Expand hull with padding
+                const padded = expandHull(d.hull, 30);
+                return 'M' + padded.join('L') + 'Z';
+            })
+            .attr('stroke', d => SUBNET_COLORS[d.type] || '#475569')
+            .attr('fill', d => SUBNET_COLORS[d.type] || '#475569');
+
+        // Subnet labels
+        const subnetLabels = hullGroup.selectAll('text.subnet-label').data(hullData, d => d.cidr);
+        subnetLabels.exit().remove();
+        subnetLabels.enter().append('text')
+            .attr('class', 'subnet-label')
+            .merge(subnetLabels)
+            .attr('x', d => d3.mean(d.hull, p => p[0]))
+            .attr('y', d => d3.min(d.hull, p => p[1]) - 15)
+            .attr('text-anchor', 'middle')
+            .attr('fill', d => SUBNET_COLORS[d.type] || '#475569')
+            .text(d => `${d.name} (${d.cidr})`);
+    }
+
+    function expandHull(hull, padding) {
+        const cx = d3.mean(hull, p => p[0]);
+        const cy = d3.mean(hull, p => p[1]);
+        return hull.map(p => {
+            const dx = p[0] - cx;
+            const dy = p[1] - cy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const scale = (dist + padding) / dist;
+            return [cx + dx * scale, cy + dy * scale];
+        });
+    }
+
+    // ── Layout switching ──
+    function switchLayout(layout) {
+        currentLayout = layout;
+        document.querySelectorAll('.view-toggle-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector(`[data-layout="${layout}"]`).classList.add('active');
+
+        const nodes = simulation.nodes();
+        simulation.stop();
+
+        if (layout === 'grouped') {
+            applyGroupedLayout(nodes);
+        } else if (layout === 'hierarchical') {
+            applyHierarchicalLayout(nodes);
+        } else {
+            // Reset to force
+            simulation
+                .force('x', d3.forceX(width / 2).strength(0.03))
+                .force('y', d3.forceY(height / 2).strength(0.03))
+                .force('charge', d3.forceManyBody().strength(-300));
+        }
+
+        simulation.alpha(1).restart();
+    }
+
+    function applyGroupedLayout(nodes) {
+        const subnets = [...new Set(nodes.map(n => n.subnet_cidr).filter(Boolean))];
+        const cols = Math.ceil(Math.sqrt(subnets.length));
+        const spacing = Math.min(width, height) / (cols + 1);
+        const subnetPositions = {};
+        subnets.forEach((s, i) => {
+            const row = Math.floor(i / cols);
+            const col = i % cols;
+            subnetPositions[s] = {
+                x: (col + 1) * spacing + 100,
+                y: (row + 1) * spacing + 50
+            };
+        });
+
+        simulation
+            .force('x', d3.forceX(d => (subnetPositions[d.subnet_cidr] || {x: width/2}).x).strength(0.3))
+            .force('y', d3.forceY(d => (subnetPositions[d.subnet_cidr] || {y: height/2}).y).strength(0.3))
+            .force('charge', d3.forceManyBody().strength(-150));
+    }
+
+    function applyHierarchicalLayout(nodes) {
+        // Layer: DMZ top, IT middle, Management side, OT bottom
+        const layers = { DMZ: 0.15, IT: 0.35, Management: 0.35, OT: 0.7 };
+        const subnetCounts = {};
+
+        nodes.forEach(n => {
+            const type = n.subnet_type || 'IT';
+            if (!subnetCounts[type]) subnetCounts[type] = 0;
+            subnetCounts[type]++;
+        });
+
+        simulation
+            .force('x', d3.forceX(width / 2).strength(0.05))
+            .force('y', d3.forceY(d => {
+                const type = d.subnet_type || 'IT';
+                return height * (layers[type] || 0.5);
+            }).strength(0.4))
+            .force('charge', d3.forceManyBody().strength(-200));
+    }
+
+    // ── Drag ──
+    function dragStart(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+    }
+    function dragging(event, d) { d.fx = event.x; d.fy = event.y; }
+    function dragEnd(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null; d.fy = null;
+    }
+
+    // ── Zoom ──
+    function zoomIn() { svg.transition().duration(300).call(zoomBehavior.scaleBy, 1.5); }
+    function zoomOut() { svg.transition().duration(300).call(zoomBehavior.scaleBy, 0.67); }
+    function resetZoom() {
+        svg.transition().duration(500).call(zoomBehavior.transform, d3.zoomIdentity
+            .translate(width/2, height/2).scale(0.8).translate(-width/2, -height/2));
+    }
+
+    // ── Tooltip ──
+    function showTooltip(event, d) {
+        const tooltip = document.getElementById('tooltip');
+        const color = DEVICE_COLORS[d.device_type] || DEVICE_COLORS.unknown;
+        tooltip.innerHTML = `
+            <div style="font-weight:600;color:${color};margin-bottom:6px;">${d.hostname || d.ip}</div>
+            <div style="color:#94a3b8;font-size:10px;">
+                ${d.ip}${d.mac ? ' / ' + d.mac : ''}<br>
+                ${d.os || 'OS Unknown'}<br>
+                ${DEVICE_LABELS[d.device_type] || 'Unknown'} ${d.vendor ? '(' + d.vendor + ')' : ''}<br>
+                ${d.open_ports || 0} open ports${d.services ? ' — ' + d.services : ''}
+            </div>
+        `;
+        tooltip.style.display = 'block';
+        tooltip.style.left = (event.pageX + 15) + 'px';
+        tooltip.style.top = (event.pageY - 10) + 'px';
+    }
+
+    function hideTooltip() {
+        document.getElementById('tooltip').style.display = 'none';
+    }
+
+    // ── Connection highlighting ──
+    function highlightConnections(d) {
+        const connectedIds = new Set();
+        linkGroup.selectAll('line').each(function(l) {
+            const srcId = l.source.id || l.source;
+            const tgtId = l.target.id || l.target;
+            if (srcId === d.id || tgtId === d.id) {
+                d3.select(this).classed('highlighted', true).attr('stroke-opacity', 0.8);
+                connectedIds.add(srcId); connectedIds.add(tgtId);
+            }
+        });
+        nodeGroup.selectAll('g.node').style('opacity', n => connectedIds.has(n.id) || n.id === d.id ? 1 : 0.2);
+        labelGroup.selectAll('text').style('opacity', n => connectedIds.has(n.id) || n.id === d.id ? 1 : 0.1);
+    }
+
+    function unhighlightAll() {
+        linkGroup.selectAll('line').classed('highlighted', false).attr('stroke-opacity', null);
+        nodeGroup.selectAll('g.node').style('opacity', 1);
+        labelGroup.selectAll('text').style('opacity', 1);
+    }
+
+    // ── Node selection ──
+    function selectNode(d) {
+        selectedNode = d;
+        const panel = document.getElementById('selectedNodePanel');
+        const info = document.getElementById('selectedNodeInfo');
+        panel.style.display = 'block';
+
+        const color = DEVICE_COLORS[d.device_type] || DEVICE_COLORS.unknown;
+        info.innerHTML = `
+            <div class="node-info">
+                <div class="node-info-title" style="color:${color};">${d.hostname || d.ip}</div>
+                <div class="node-info-row"><span class="node-info-label">IP</span><span class="node-info-value">${d.ip}</span></div>
+                <div class="node-info-row"><span class="node-info-label">MAC</span><span class="node-info-value">${d.mac || '—'}</span></div>
+                <div class="node-info-row"><span class="node-info-label">OS</span><span class="node-info-value">${d.os || '—'}</span></div>
+                <div class="node-info-row"><span class="node-info-label">Type</span><span class="node-info-value">${DEVICE_LABELS[d.device_type] || 'Unknown'}</span></div>
+                <div class="node-info-row"><span class="node-info-label">Vendor</span><span class="node-info-value">${d.vendor || '—'}</span></div>
+                <div class="node-info-row"><span class="node-info-label">Model</span><span class="node-info-value">${d.model || '—'}</span></div>
+                <div class="node-info-row"><span class="node-info-label">Firmware</span><span class="node-info-value">${d.firmware || '—'}</span></div>
+                <div class="node-info-row"><span class="node-info-label">Domain</span><span class="node-info-value">${d.domain || '—'}</span></div>
+                <div class="node-info-row"><span class="node-info-label">Subnet</span><span class="node-info-value">${d.subnet_cidr || '—'}</span></div>
+                <div class="node-info-row"><span class="node-info-label">Ports</span><span class="node-info-value">${d.open_ports || 0}</span></div>
+                <div class="node-info-row"><span class="node-info-label">Services</span><span class="node-info-value" style="font-size:10px;">${d.services || '—'}</span></div>
+                <div class="node-info-row"><span class="node-info-label">Criticality</span>
+                    <span class="crit-badge crit-${d.criticality}">${d.criticality}</span></div>
+                <div style="margin-top:10px;">
+                    <a href="/mission/${MISSION_ID}" onclick="event.stopPropagation();" class="btn btn-sm btn-secondary" style="font-size:10px;text-decoration:none;">
+                        View Full Details →
+                    </a>
+                </div>
+            </div>`;
+    }
+
+    // ── Search ──
+    function searchNodes(query) {
+        const q = query.toLowerCase();
+        nodeGroup.selectAll('g.node').style('opacity', d => {
+            if (!q) return 1;
+            const match = `${d.ip} ${d.hostname} ${d.os} ${d.vendor} ${d.device_type}`.toLowerCase().includes(q);
+            return match ? 1 : 0.1;
+        });
+        labelGroup.selectAll('text').style('opacity', d => {
+            if (!q) return 1;
+            const match = `${d.ip} ${d.hostname} ${d.os} ${d.vendor} ${d.device_type}`.toLowerCase().includes(q);
+            return match ? 1 : 0.05;
+        });
+    }
+
+    // ── Build sidebar ──
+    function buildSubnetList() {
+        const list = document.getElementById('subnetList');
+        list.innerHTML = topoData.subnets.map(s => {
+            const color = SUBNET_COLORS[s.type] || '#475569';
+            const hostCount = topoData.nodes.filter(n => n.subnet_cidr === s.cidr).length;
+            return `<div class="subnet-item" onclick="focusSubnet('${s.cidr}')">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <div style="width:8px;height:8px;border-radius:2px;background:${color};"></div>
+                    <div>
+                        <div style="color:var(--text-primary);font-size:11px;">${s.name || s.cidr}</div>
+                        <div style="color:var(--text-muted);font-size:9px;">${s.cidr} • VLAN ${s.vlan || '—'}</div>
+                    </div>
+                </div>
+                <div>
+                    <span class="badge" style="background:rgba(${color === '#ef4444' ? '239,68,68' : '14,165,233'},0.15);color:${color};">${hostCount}</span>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function buildLegend() {
+        const types = [...new Set(topoData.nodes.map(n => n.device_type))].filter(Boolean);
+        document.getElementById('deviceLegend').innerHTML = types.map(t => `
+            <div class="legend-item">
+                <div class="legend-dot" style="background:${DEVICE_COLORS[t]||DEVICE_COLORS.unknown};"></div>
+                <span>${DEVICE_LABELS[t]||t}</span>
+                <span style="margin-left:auto;color:var(--text-muted);">${topoData.nodes.filter(n=>n.device_type===t).length}</span>
+            </div>
+        `).join('');
+    }
+
+    // ── Focus on subnet ──
+    function focusSubnet(cidr) {
+        const subnetNodes = simulation.nodes().filter(n => n.subnet_cidr === cidr);
+        if (subnetNodes.length === 0) return;
+
+        const xMin = d3.min(subnetNodes, n => n.x) - 80;
+        const xMax = d3.max(subnetNodes, n => n.x) + 80;
+        const yMin = d3.min(subnetNodes, n => n.y) - 80;
+        const yMax = d3.max(subnetNodes, n => n.y) + 80;
+
+        const bw = xMax - xMin;
+        const bh = yMax - yMin;
+        const scale = Math.min(width / bw, height / bh) * 0.8;
+        const cx = (xMin + xMax) / 2;
+        const cy = (yMin + yMax) / 2;
+
+        svg.transition().duration(750).call(
+            zoomBehavior.transform,
+            d3.zoomIdentity.translate(width/2, height/2).scale(scale).translate(-cx, -cy)
+        );
+
+        // Highlight
+        nodeGroup.selectAll('g.node').style('opacity', d => d.subnet_cidr === cidr ? 1 : 0.15);
+        labelGroup.selectAll('text').style('opacity', d => d.subnet_cidr === cidr ? 1 : 0.05);
+        setTimeout(() => {
+            nodeGroup.selectAll('g.node').style('opacity', 1);
+            labelGroup.selectAll('text').style('opacity', 1);
+        }, 2000);
+    }
+
+    // ── Stats ──
+    function updateStats() {
+        const otCount = topoData.nodes.filter(n => ['plc','rtu','hmi','scada'].includes(n.device_type)).length;
+        const critCount = topoData.nodes.filter(n => n.criticality === 'critical').length;
+        document.getElementById('topoStats').innerHTML = `
+            <div class="topo-stat"><div class="topo-stat-val">${topoData.nodes.length}</div><div class="topo-stat-label">Hosts</div></div>
+            <div class="topo-stat"><div class="topo-stat-val">${topoData.edges.length}</div><div class="topo-stat-label">Connections</div></div>
+            <div class="topo-stat"><div class="topo-stat-val">${topoData.subnets.length}</div><div class="topo-stat-label">Subnets</div></div>
+            <div class="topo-stat"><div class="topo-stat-val" style="color:var(--accent-red);">${otCount}</div><div class="topo-stat-label">OT Devices</div></div>
+            <div class="topo-stat"><div class="topo-stat-val" style="color:var(--crit-critical);">${critCount}</div><div class="topo-stat-label">Critical</div></div>
+        `;
+    }
+
+    // ── Export SVG ──
+    function exportSVG() {
+        const svgData = document.getElementById('topologySvg').outerHTML;
+        const blob = new Blob([svgData], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `topology_mission_${MISSION_ID}.svg`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // ── Window resize ──
+    window.addEventListener('resize', () => {
+        const container = document.getElementById('topoMain');
+        width = container.clientWidth;
+        height = container.clientHeight;
+        if (simulation) {
+            simulation.force('center', d3.forceCenter(width / 2, height / 2));
+            simulation.alpha(0.3).restart();
+        }
+    });
+
+    init();
+    </script>
+</body>
+</html>
