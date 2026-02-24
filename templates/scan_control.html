@@ -397,19 +397,19 @@
             }
         },
         service_scan: {
-            name: 'Service Detection', brief: 'Identify services, versions, and banners on open ports', mode: 'active',
+            name: 'Service Detection', brief: 'Identify services, versions, and banners on open ports via nmap -sV', mode: 'active',
             detail: {
-                summary: 'Deep-probes open ports found by Port Scan to identify running services, version info, and banners. Updates the Service Name, Version, and Notes columns in the host detail view.',
+                summary: 'Uses <code>nmap -sV</code> as the primary method to fingerprint services on open ports found by Port Scan. Identifies service name, product, version, and extra info. Falls back to socket-based banner grabbing when nmap is unavailable or for ports nmap could not identify. Updates the Service Name, Version, and Banner columns in the host detail view.',
                 network_actions: [
-                    '<code>TCP connect</code> to each open port from Port Scan results',
-                    'Protocol probes: <code>HTTP GET /</code>, SSH banner wait, <code>SMB Negotiate</code>, <code>RDP X.224</code>, etc.',
+                    '<code>nmap -sV -Pn</code> service version detection on all known open ports (primary)',
+                    'Fallback: <code>TCP connect</code> + protocol probes (<code>HTTP GET /</code>, SSH banner wait, <code>SMB Negotiate</code>, <code>RDP X.224</code>, etc.)',
                     'TLS ports: <code>TLS handshake</code> + server certificate extraction (subject, SAN, issuer)',
                     'OT ports: read-only identification probes (Modbus FC43, S7comm COTP, etc.)',
                 ],
-                tools_used: 'Python socket with protocol-specific probe library',
+                tools_used: 'nmap -sV (primary), Python socket with protocol-specific probes (fallback)',
                 ports_touched: 'Only ports previously identified as open by Port Scan',
                 protocols: 'TCP (HTTP, SSH, SMB, RDP, FTP, SMTP, LDAP, TLS, etc.)',
-                risk: 'Low-moderate. Connects to already-known ports. Brief connections. Standard client behavior.',
+                risk: 'Low-moderate. Connects to already-known ports. nmap -sV sends version probes. Standard client behavior.',
             }
         },
         os_detect: {
