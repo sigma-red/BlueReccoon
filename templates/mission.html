@@ -48,6 +48,7 @@
 
         <div class="tab-bar" id="tabBar">
             <div class="tab-item active" data-tab="hosts">Hosts</div>
+            <div class="tab-item" data-tab="ad">Active Directory</div>
             <div class="tab-item" data-tab="subnets">Subnets</div>
             <div class="tab-item" data-tab="connections">Connections</div>
             <div class="tab-item" data-tab="intel">Threat Intel</div>
@@ -55,6 +56,7 @@
         </div>
 
         <div id="tab-hosts" class="tab-panel"></div>
+        <div id="tab-ad" class="tab-panel" style="display:none;"></div>
         <div id="tab-subnets" class="tab-panel" style="display:none;"></div>
         <div id="tab-connections" class="tab-panel" style="display:none;"></div>
         <div id="tab-intel" class="tab-panel" style="display:none;"></div>
@@ -224,6 +226,7 @@
 
         await loadStats();
         await loadHosts();
+        await loadAD();
         await loadSubnets();
         await loadConnections();
         await loadIntel();
@@ -247,6 +250,7 @@
     async function loadStats() {
         const stats = await fetchJSON(`/api/missions/${MISSION_ID}/stats`);
         const profileStats = stats.profile || {};
+        const adStats = stats.ad || {};
         document.getElementById('missionStats').innerHTML = `
             <div class="stat-card"><div class="stat-value">${stats.hosts.total}</div><div class="stat-label">Hosts Discovered</div></div>
             <div class="stat-card"><div class="stat-value">${stats.hosts.alive}</div><div class="stat-label">Hosts Alive</div></div>
@@ -254,6 +258,9 @@
             <div class="stat-card"><div class="stat-value" style="color:var(--accent-red)">${stats.services.ot_protocols}</div><div class="stat-label">OT Protocols</div></div>
             <div class="stat-card"><div class="stat-value">${stats.subnets}</div><div class="stat-label">Subnets</div></div>
             <div class="stat-card"><div class="stat-value">${stats.connections}</div><div class="stat-label">Connections</div></div>
+            ${adStats.domains ? `<div class="stat-card"><div class="stat-value" style="color:var(--accent-amber)">${adStats.domains}</div><div class="stat-label">AD Domains</div></div>` : ''}
+            ${adStats.privileged_accounts ? `<div class="stat-card"><div class="stat-value" style="color:var(--accent-red)">${adStats.privileged_accounts}</div><div class="stat-label">Admin Accounts</div></div>` : ''}
+            ${adStats.smb_shares ? `<div class="stat-card"><div class="stat-value">${adStats.smb_shares}</div><div class="stat-label">SMB Shares</div></div>` : ''}
             ${profileStats.hosts_profiled ? `<div class="stat-card"><div class="stat-value" style="color:var(--accent-green)">${profileStats.hosts_profiled}</div><div class="stat-label">Hosts Profiled</div></div>` : ''}
         `;
     }
@@ -328,6 +335,149 @@
             return true;
         });
         document.getElementById('hostsTableBody').innerHTML = renderHostRows(filtered);
+    }
+
+    // ── Active Directory ──
+    async function loadAD() {
+        const domains = await fetchJSON(`/api/missions/${MISSION_ID}/domain_info`);
+        const accounts = await fetchJSON(`/api/missions/${MISSION_ID}/privileged_accounts`);
+        const container = document.getElementById('tab-ad');
+
+        if (domains.length === 0 && accounts.length === 0) {
+            container.innerHTML = '<div class="empty-state" style="padding:40px;">No Active Directory data collected yet. Run AD Enumeration or SMB Enumeration scans.</div>';
+            return;
+        }
+
+        let html = '';
+
+        // Domain Info
+        domains.forEach(d => {
+            const dcs = JSON.parse(d.domain_controllers || '[]');
+            const trusts = JSON.parse(d.trusts || '[]');
+            const ous = JSON.parse(d.ous || '[]');
+            const gpos = JSON.parse(d.gpos || '[]');
+
+            html += `<div class="panel" style="margin-bottom:16px;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent-amber);text-transform:uppercase;letter-spacing:1px;">Domain: ${escapeHtml(d.domain_name)}</span>
+                    ${d.functional_level ? `<span class="badge badge-blue">${escapeHtml(d.functional_level)}</span>` : ''}
+                </div>
+                <div style="padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                    <div>
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Domain Info</div>
+                        ${detailRow('Domain Name', d.domain_name)}
+                        ${detailRow('Forest Name', d.forest_name)}
+                        ${detailRow('Functional Level', d.functional_level)}
+                        ${detailRow('Discovered', d.discovered_at)}
+                    </div>
+                    <div>
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Domain Controllers (${dcs.length})</div>
+                        ${dcs.length > 0 ? dcs.map(dc => `<div style="font-size:12px;color:var(--text-bright);padding:2px 0;">${escapeHtml(typeof dc === 'string' ? dc : dc.name || JSON.stringify(dc))}</div>`).join('') : '<span style="color:var(--text-muted);font-size:12px;">None found</span>'}
+                    </div>
+                </div>`;
+
+            // Trusts
+            if (trusts.length > 0) {
+                html += `<div style="padding:0 14px 14px;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Trust Relationships (${trusts.length})</div>
+                    <table class="data-table"><thead><tr><th>Trusted Domain</th><th>Direction</th></tr></thead><tbody>
+                    ${trusts.map(t => `<tr>
+                        <td style="color:var(--text-bright);font-size:12px;">${escapeHtml(typeof t === 'string' ? t : t.name || '')}</td>
+                        <td style="font-size:12px;">${escapeHtml(typeof t === 'string' ? '' : t.direction || '')}</td>
+                    </tr>`).join('')}
+                    </tbody></table>
+                </div>`;
+            }
+
+            // OUs
+            if (ous.length > 0) {
+                html += `<div style="padding:0 14px 14px;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Organizational Units (${ous.length})</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        ${ous.map(ou => `<span class="badge badge-blue" style="font-size:10px;">${escapeHtml(typeof ou === 'string' ? ou : ou.name || '')}</span>`).join('')}
+                    </div>
+                </div>`;
+            }
+
+            // GPOs
+            if (gpos.length > 0) {
+                html += `<div style="padding:0 14px 14px;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Group Policy Objects (${gpos.length})</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        ${gpos.map(g => `<span class="badge badge-blue" style="font-size:10px;">${escapeHtml(typeof g === 'string' ? g : g.name || '')}</span>`).join('')}
+                    </div>
+                </div>`;
+            }
+
+            html += `</div>`;
+        });
+
+        // Privileged Accounts
+        if (accounts.length > 0) {
+            const admins = accounts.filter(a => a.is_admin);
+            const spnAccts = accounts.filter(a => a.spn);
+            const otherAccts = accounts.filter(a => !a.is_admin && !a.spn);
+
+            html += `<div class="panel" style="margin-bottom:16px;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent-red);text-transform:uppercase;letter-spacing:1px;">
+                    Privileged &amp; Notable Accounts (${accounts.length})
+                </div>`;
+
+            // Admin accounts
+            if (admins.length > 0) {
+                html += `<div style="padding:14px;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent-red);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Admin Accounts (${admins.length})</div>
+                    <table class="data-table"><thead><tr><th>Account</th><th>Type</th><th>Domain</th><th>Groups</th><th>Notes</th></tr></thead><tbody>
+                    ${admins.map(a => {
+                        const groups = JSON.parse(a.groups || '[]');
+                        return `<tr>
+                            <td style="color:var(--accent-red);font-weight:500;font-size:12px;">${escapeHtml(a.account_name)}</td>
+                            <td style="font-size:11px;">${a.account_type || '—'}</td>
+                            <td style="font-size:11px;color:var(--text-muted);">${a.domain || '—'}</td>
+                            <td style="font-size:10px;">${groups.map(g => `<span class="badge badge-red" style="font-size:9px;">${escapeHtml(g)}</span>`).join(' ') || '—'}</td>
+                            <td style="font-size:10px;color:var(--text-muted);">${a.notes || '—'}</td>
+                        </tr>`;
+                    }).join('')}
+                    </tbody></table>
+                </div>`;
+            }
+
+            // SPN / Kerberoastable accounts
+            if (spnAccts.length > 0) {
+                html += `<div style="padding:0 14px 14px;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent-amber);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Kerberoastable Accounts — SPN (${spnAccts.length})</div>
+                    <table class="data-table"><thead><tr><th>Account</th><th>Domain</th><th>SPN</th><th>Notes</th></tr></thead><tbody>
+                    ${spnAccts.map(a => `<tr>
+                        <td style="color:var(--accent-amber);font-weight:500;font-size:12px;">${escapeHtml(a.account_name)}</td>
+                        <td style="font-size:11px;color:var(--text-muted);">${a.domain || '—'}</td>
+                        <td style="font-size:10px;font-family:'JetBrains Mono',monospace;">${escapeHtml(a.spn || '—')}</td>
+                        <td style="font-size:10px;color:var(--text-muted);">${a.notes || '—'}</td>
+                    </tr>`).join('')}
+                    </tbody></table>
+                </div>`;
+            }
+
+            // Other enumerated accounts
+            if (otherAccts.length > 0) {
+                html += `<div style="padding:0 14px 14px;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Enumerated Accounts (${otherAccts.length})</div>
+                    <div style="max-height:250px;overflow-y:auto;">
+                    <table class="data-table"><thead><tr><th>Account</th><th>Type</th><th>Domain</th><th>Notes</th></tr></thead><tbody>
+                    ${otherAccts.map(a => `<tr>
+                        <td style="color:var(--text-bright);font-size:12px;">${escapeHtml(a.account_name)}</td>
+                        <td style="font-size:11px;">${a.account_type || '—'}</td>
+                        <td style="font-size:11px;color:var(--text-muted);">${a.domain || '—'}</td>
+                        <td style="font-size:10px;color:var(--text-muted);">${a.notes || '—'}</td>
+                    </tr>`).join('')}
+                    </tbody></table>
+                    </div>
+                </div>`;
+            }
+
+            html += `</div>`;
+        }
+
+        container.innerHTML = html;
     }
 
     // ── Host Detail ──
@@ -423,6 +573,25 @@
                     ${detailRow('Protocol', o.protocol)}
                     ${detailRow('Role', o.master_slave_role)}
                 </div>
+            </div>`;
+        }
+
+        // SMB Shares
+        if (data.smb_shares && data.smb_shares.length > 0) {
+            html += `<div class="panel" style="margin-bottom:16px;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">
+                    SMB Shares (${data.smb_shares.length})
+                </div>
+                <table class="data-table"><thead><tr><th>Share Name</th><th>Type</th><th>Comment</th></tr></thead><tbody>
+                ${data.smb_shares.map(s => {
+                    const typeColor = s.share_type === 'Disk' ? 'var(--accent-cyan)' : s.share_type === 'IPC' ? 'var(--accent-amber)' : 'var(--text-muted)';
+                    return `<tr>
+                        <td style="color:var(--text-bright);font-weight:500;font-size:12px;">${escapeHtml(s.share_name)}</td>
+                        <td><span style="color:${typeColor};font-size:11px;">${s.share_type || '—'}</span></td>
+                        <td style="font-size:11px;color:var(--text-muted);">${s.comment || '—'}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody></table>
             </div>`;
         }
 

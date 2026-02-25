@@ -207,6 +207,8 @@ class ScanEngine:
                 self._ingest_scheduled_task(db, result)
             elif rtype == 'local_group':
                 self._ingest_local_group(db, result)
+            elif rtype == 'smb_share':
+                self._ingest_smb_share(db, result)
             elif rtype == 'host_update':
                 self._update_host_fields(db, result)
 
@@ -656,6 +658,34 @@ class ScanEngine:
             """, (
                 host_id, group_name, group_type, members_json,
                 result.get('description', ''), result.get('is_privileged', 0)
+            ))
+
+    def _ingest_smb_share(self, db, result):
+        """Insert an SMB share entry."""
+        host_id = self._resolve_host_id(db, result)
+        if not host_id:
+            return
+        share_name = result['share_name']
+        # Avoid duplicates by host_id + share_name
+        existing = db.execute(
+            "SELECT id FROM smb_shares WHERE host_id = ? AND share_name = ?",
+            (host_id, share_name)
+        ).fetchone()
+        if existing:
+            db.execute("""
+                UPDATE smb_shares SET share_type = ?, comment = ?,
+                    collected_at = datetime('now')
+                WHERE id = ?
+            """, (result.get('share_type', ''), result.get('comment', ''),
+                  existing['id']))
+        else:
+            db.execute("""
+                INSERT INTO smb_shares (host_id, share_name, share_type, comment)
+                VALUES (?, ?, ?, ?)
+            """, (
+                host_id, share_name,
+                result.get('share_type', ''),
+                result.get('comment', '')
             ))
 
     def _update_host_fields(self, db, result):
