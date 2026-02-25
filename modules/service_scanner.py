@@ -122,19 +122,18 @@ class ServiceScanner(BaseScanner):
             # ── Primary method: nmap -sV ──
             nmap_results = self._nmap_service_scan(host_ports)
 
-            # Submit nmap results
+            # Submit nmap results — only for ports originally known per host
             for ip, port_results in nmap_results.items():
+                if ip not in host_ports:
+                    continue
+                known_ports = {p: pr for p, pr in host_ports[ip]}
                 for port, result in port_results.items():
+                    if port not in known_ports:
+                        continue
                     total_services += 1
                     if result.get('service_name') or result.get('service_version') or result.get('banner'):
                         total_banners += 1
-                    # Resolve original protocol from host_ports
-                    proto = 'tcp'
-                    if ip in host_ports:
-                        for p, pr in host_ports[ip]:
-                            if p == port:
-                                proto = pr
-                                break
+                    proto = known_ports[port]
                     self.submit_service(ip, port, proto, **result)
 
             # Fallback: socket-based banner grabbing for ports nmap missed
