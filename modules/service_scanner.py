@@ -90,6 +90,7 @@ class ServiceScanner(BaseScanner):
             ).fetchone()
 
             if not host:
+                logger.debug(f"No host record for {ip}, skipping")
                 continue
 
             services = db.execute(
@@ -100,8 +101,22 @@ class ServiceScanner(BaseScanner):
             if not services:
                 # If no services known yet, try common ports
                 services = [{'port': p, 'protocol': 'tcp'} for p in [22, 80, 443, 445, 3389]]
+                logger.info(f"No open services in DB for {ip}, trying common ports")
 
             host_ports[ip] = [(s['port'], s['protocol']) for s in services]
+
+        if not host_ports:
+            db.close()
+            logger.warning("No hosts with open services found — run Port Scan first")
+            self.progress(100, "No hosts with open services found — run Port Scan first")
+            return {
+                'services_probed': 0,
+                'banners_grabbed': 0,
+                'warning': 'No hosts with open services found. Run Port Scan first.'
+            }
+
+        logger.info(f"Service scan: {len(host_ports)} hosts, "
+                     f"{sum(len(v) for v in host_ports.values())} total ports to probe")
 
         if use_nmap:
             # ── Primary method: nmap -sV ──
@@ -207,8 +222,8 @@ class ServiceScanner(BaseScanner):
 
             target_str = ' '.join(chunk)
             cmd = (
-                f"nmap -sV --version-intensity 5 "
-                f"-p {port_str} -oX - {target_str} 2>/dev/null"
+                f"nmap -sV -Pn --version-intensity 5 "
+                f"-p {port_str} -oX - {target_str}"
             )
 
             self.log_send(
@@ -225,8 +240,13 @@ class ServiceScanner(BaseScanner):
             if rc == 0 and stdout:
                 chunk_results = self._parse_nmap_service_output(stdout)
                 results.update(chunk_results)
+                logger.info(f"nmap -sV chunk {ci + 1}: identified services on "
+                            f"{len(chunk_results)} hosts")
             else:
-                logger.warning(f"nmap -sV failed for chunk {ci + 1}: rc={rc}")
+                logger.warning(f"nmap -sV failed for chunk {ci + 1}: rc={rc}, "
+                               f"stderr={stderr[:200] if stderr else 'none'}")
+                self.log(f"nmap -sV failed (rc={rc}), falling back to socket probes",
+                         severity='WARN', category='tool_exec', tool='nmap')
 
         return results
 
