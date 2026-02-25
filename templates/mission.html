@@ -49,6 +49,7 @@
         <div class="tab-bar" id="tabBar">
             <div class="tab-item active" data-tab="hosts">Hosts</div>
             <div class="tab-item" data-tab="ad">Active Directory</div>
+            <div class="tab-item" data-tab="profiles">Host Profiles</div>
             <div class="tab-item" data-tab="subnets">Subnets</div>
             <div class="tab-item" data-tab="connections">Connections</div>
             <div class="tab-item" data-tab="intel">Threat Intel</div>
@@ -57,6 +58,7 @@
 
         <div id="tab-hosts" class="tab-panel"></div>
         <div id="tab-ad" class="tab-panel" style="display:none;"></div>
+        <div id="tab-profiles" class="tab-panel" style="display:none;"></div>
         <div id="tab-subnets" class="tab-panel" style="display:none;"></div>
         <div id="tab-connections" class="tab-panel" style="display:none;"></div>
         <div id="tab-intel" class="tab-panel" style="display:none;"></div>
@@ -227,6 +229,7 @@
         await loadStats();
         await loadHosts();
         await loadAD();
+        await loadProfiles();
         await loadSubnets();
         await loadConnections();
         await loadIntel();
@@ -478,6 +481,292 @@
         }
 
         container.innerHTML = html;
+    }
+
+    // ── Host Profiles ──
+    let profiledHosts = [];
+    let expandedProfileHost = null;
+
+    async function loadProfiles() {
+        profiledHosts = await fetchJSON(`/api/missions/${MISSION_ID}/host_profiles`);
+        const container = document.getElementById('tab-profiles');
+
+        if (profiledHosts.length === 0) {
+            container.innerHTML = '<div class="empty-state" style="padding:40px;">No hosts profiled yet. Run the Host Profiling scan to collect software, processes, services, tasks, and group data.</div>';
+            return;
+        }
+
+        // Summary stats
+        const totals = profiledHosts.reduce((acc, h) => ({
+            software: acc.software + (h.software_count || 0),
+            processes: acc.processes + (h.process_count || 0),
+            services: acc.services + (h.service_count || 0),
+            tasks: acc.tasks + (h.task_count || 0),
+            groups: acc.groups + (h.group_count || 0),
+            shares: acc.shares + (h.smb_share_count || 0)
+        }), {software:0, processes:0, services:0, tasks:0, groups:0, shares:0});
+
+        let html = `<div class="stats-row" style="margin-bottom:16px;">
+            <div class="stat-card"><div class="stat-value" style="color:var(--accent-green)">${profiledHosts.length}</div><div class="stat-label">Hosts Profiled</div></div>
+            <div class="stat-card"><div class="stat-value">${totals.software}</div><div class="stat-label">Software Entries</div></div>
+            <div class="stat-card"><div class="stat-value">${totals.processes}</div><div class="stat-label">Processes</div></div>
+            <div class="stat-card"><div class="stat-value">${totals.services}</div><div class="stat-label">System Services</div></div>
+            <div class="stat-card"><div class="stat-value">${totals.tasks}</div><div class="stat-label">Scheduled Tasks</div></div>
+            <div class="stat-card"><div class="stat-value">${totals.groups}</div><div class="stat-label">Local Groups</div></div>
+            ${totals.shares ? `<div class="stat-card"><div class="stat-value">${totals.shares}</div><div class="stat-label">SMB Shares</div></div>` : ''}
+        </div>`;
+
+        // Filter
+        html += `<div style="margin-bottom:12px;">
+            <input type="text" class="form-input" style="max-width:300px;padding:6px 12px;font-size:12px;" placeholder="Filter profiled hosts..." id="profileFilter" oninput="filterProfiles()">
+        </div>`;
+
+        // Host table
+        html += `<div class="panel"><div style="overflow-x:auto;"><table class="data-table"><thead><tr>
+            <th></th><th>IP Address</th><th>Hostname</th><th>OS</th><th>Software</th>
+            <th>Processes</th><th>Services</th><th>Tasks</th><th>Groups</th>
+        </tr></thead><tbody id="profilesTableBody">`;
+        html += renderProfileRows(profiledHosts);
+        html += `</tbody></table></div></div>`;
+
+        // Expanded detail container
+        html += `<div id="profileDetailContainer"></div>`;
+
+        container.innerHTML = html;
+    }
+
+    function renderProfileRows(hosts) {
+        return hosts.map(h => {
+            const color = DEVICE_COLORS[h.device_type] || DEVICE_COLORS.unknown;
+            const isExpanded = expandedProfileHost === h.id;
+            return `<tr onclick="toggleProfileDetail(${h.id})" style="cursor:pointer;${isExpanded ? 'background:rgba(14,165,233,0.08);' : ''}">
+                <td style="width:20px;color:var(--accent-cyan);font-size:10px;">${isExpanded ? '&#9660;' : '&#9654;'}</td>
+                <td style="color:var(--text-bright);font-weight:500;">${h.ip_address}</td>
+                <td>${h.hostname || '<span style="color:var(--text-muted)">—</span>'}</td>
+                <td style="font-size:11px;">${h.os_name ? `${h.os_name} ${h.os_version||''}` : '—'}</td>
+                <td><span class="badge badge-blue">${h.software_count || 0}</span></td>
+                <td><span class="badge badge-blue">${h.process_count || 0}</span></td>
+                <td><span class="badge badge-blue">${h.service_count || 0}</span></td>
+                <td><span class="badge badge-blue">${h.task_count || 0}</span></td>
+                <td><span class="badge badge-blue">${h.group_count || 0}</span></td>
+            </tr>`;
+        }).join('');
+    }
+
+    function filterProfiles() {
+        const text = document.getElementById('profileFilter').value.toLowerCase();
+        const filtered = profiledHosts.filter(h => {
+            return `${h.ip_address} ${h.hostname} ${h.os_name}`.toLowerCase().includes(text);
+        });
+        document.getElementById('profilesTableBody').innerHTML = renderProfileRows(filtered);
+    }
+
+    async function toggleProfileDetail(hostId) {
+        const container = document.getElementById('profileDetailContainer');
+        if (expandedProfileHost === hostId) {
+            expandedProfileHost = null;
+            container.innerHTML = '';
+            document.getElementById('profilesTableBody').innerHTML = renderProfileRows(profiledHosts);
+            return;
+        }
+
+        expandedProfileHost = hostId;
+        document.getElementById('profilesTableBody').innerHTML = renderProfileRows(profiledHosts);
+        container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">Loading profile data...</div>';
+
+        const data = await fetchJSON(`/api/hosts/${hostId}`);
+        const h = data.host;
+
+        let html = `<div class="panel" style="margin-top:16px;border-color:rgba(14,165,233,0.3);">
+            <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--accent-cyan);font-weight:600;">
+                    ${escapeHtml(h.hostname || h.ip_address)} ${h.os_name ? `— ${escapeHtml(h.os_name)} ${h.os_version||''}` : ''}
+                </span>
+                <button class="btn btn-secondary" style="padding:3px 10px;font-size:10px;" onclick="toggleProfileDetail(${hostId})">Close</button>
+            </div>`;
+
+        // Sub-tab bar for profile sections
+        const sections = [];
+        if (data.software && data.software.length) sections.push({id:'sw', label:`Software (${data.software.length})`});
+        if (data.processes && data.processes.length) sections.push({id:'proc', label:`Processes (${data.processes.length})`});
+        if (data.host_services && data.host_services.length) sections.push({id:'svc', label:`Services (${data.host_services.length})`});
+        if (data.scheduled_tasks && data.scheduled_tasks.length) sections.push({id:'task', label:`Tasks (${data.scheduled_tasks.length})`});
+        if (data.local_groups && data.local_groups.length) sections.push({id:'grp', label:`Groups (${data.local_groups.length})`});
+        if (data.smb_shares && data.smb_shares.length) sections.push({id:'smb', label:`SMB Shares (${data.smb_shares.length})`});
+
+        if (sections.length === 0) {
+            html += '<div style="padding:20px;text-align:center;color:var(--text-muted);">No profile data collected for this host.</div></div>';
+            container.innerHTML = html;
+            return;
+        }
+
+        html += `<div style="display:flex;gap:0;border-bottom:1px solid var(--border-primary);">`;
+        sections.forEach((s, i) => {
+            html += `<div class="profile-sub-tab${i===0?' profile-sub-tab-active':''}" data-section="${s.id}" onclick="switchProfileSection('${s.id}', this)"
+                style="padding:8px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer;color:${i===0?'var(--accent-cyan)':'var(--text-muted)'};border-bottom:2px solid ${i===0?'var(--accent-cyan)':'transparent'};transition:all 0.15s;"
+                onmouseenter="if(!this.classList.contains('profile-sub-tab-active'))this.style.color='var(--text-primary)'"
+                onmouseleave="if(!this.classList.contains('profile-sub-tab-active'))this.style.color='var(--text-muted)'"
+                >${s.label}</div>`;
+        });
+        html += `</div>`;
+
+        // Software section
+        if (data.software && data.software.length) {
+            html += `<div class="profile-section" id="profile-sec-sw" style="display:block;">
+                <div style="padding:8px 14px;display:flex;gap:8px;align-items:center;">
+                    <input type="text" class="form-input" style="max-width:250px;padding:4px 10px;font-size:11px;" placeholder="Search software..." oninput="filterProfileTable(this, 'profile-sw-tbody')">
+                </div>
+                <div style="max-height:400px;overflow-y:auto;">
+                <table class="data-table"><thead><tr><th>Name</th><th>Version</th><th>Publisher</th><th>Install Date</th><th>Source</th><th>Arch</th></tr></thead>
+                <tbody id="profile-sw-tbody">
+                ${data.software.map(s => `<tr>
+                    <td style="color:var(--text-bright);font-size:11px;">${escapeHtml(s.name)}</td>
+                    <td style="font-size:11px;">${s.version || '—'}</td>
+                    <td style="font-size:11px;color:var(--text-muted);">${s.publisher || '—'}</td>
+                    <td style="font-size:10px;color:var(--text-muted);">${s.install_date || '—'}</td>
+                    <td><span class="badge badge-blue" style="font-size:9px;">${s.install_source || '—'}</span></td>
+                    <td style="font-size:10px;color:var(--text-muted);">${s.architecture || '—'}</td>
+                </tr>`).join('')}
+                </tbody></table>
+                </div>
+            </div>`;
+        }
+
+        // Processes section
+        if (data.processes && data.processes.length) {
+            html += `<div class="profile-section" id="profile-sec-proc" style="display:none;">
+                <div style="padding:8px 14px;display:flex;gap:8px;align-items:center;">
+                    <input type="text" class="form-input" style="max-width:250px;padding:4px 10px;font-size:11px;" placeholder="Search processes..." oninput="filterProfileTable(this, 'profile-proc-tbody')">
+                </div>
+                <div style="max-height:400px;overflow-y:auto;">
+                <table class="data-table"><thead><tr><th>PID</th><th>Name</th><th>User</th><th>Memory</th><th>Command Line</th></tr></thead>
+                <tbody id="profile-proc-tbody">
+                ${data.processes.map(p => `<tr>
+                    <td style="color:var(--accent-cyan);font-size:11px;">${p.pid != null ? p.pid : '—'}</td>
+                    <td style="color:var(--text-bright);font-size:11px;">${escapeHtml(p.name)}</td>
+                    <td style="font-size:11px;color:var(--text-muted);">${p.username || '—'}</td>
+                    <td style="font-size:11px;">${p.memory_bytes ? formatBytes(p.memory_bytes) : '—'}</td>
+                    <td style="font-size:10px;color:var(--text-muted);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(p.command_line||'')}">${escapeHtml(p.command_line || '—')}</td>
+                </tr>`).join('')}
+                </tbody></table>
+                </div>
+            </div>`;
+        }
+
+        // System Services section
+        if (data.host_services && data.host_services.length) {
+            html += `<div class="profile-section" id="profile-sec-svc" style="display:none;">
+                <div style="padding:8px 14px;display:flex;gap:8px;align-items:center;">
+                    <input type="text" class="form-input" style="max-width:250px;padding:4px 10px;font-size:11px;" placeholder="Search services..." oninput="filterProfileTable(this, 'profile-svc-tbody')">
+                </div>
+                <div style="max-height:400px;overflow-y:auto;">
+                <table class="data-table"><thead><tr><th>Service</th><th>Display Name</th><th>State</th><th>Start Type</th><th>Run As</th><th>Path</th></tr></thead>
+                <tbody id="profile-svc-tbody">
+                ${data.host_services.map(s => {
+                    const stateColor = s.service_state === 'running' ? 'var(--accent-green)' : (s.service_state === 'stopped' || s.service_state === 'dead') ? 'var(--accent-red)' : 'var(--text-muted)';
+                    return `<tr>
+                        <td style="color:var(--text-bright);font-size:11px;">${escapeHtml(s.service_name || s.name)}</td>
+                        <td style="font-size:11px;">${s.service_display_name || '—'}</td>
+                        <td><span style="color:${stateColor};font-size:11px;font-weight:500;">${s.service_state || '—'}</span></td>
+                        <td style="font-size:11px;color:var(--text-muted);">${s.start_type || '—'}</td>
+                        <td style="font-size:11px;color:var(--text-muted);">${s.username || '—'}</td>
+                        <td style="font-size:10px;color:var(--text-muted);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.exe_path||'')}">${escapeHtml(s.exe_path || '—')}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody></table>
+                </div>
+            </div>`;
+        }
+
+        // Scheduled Tasks section
+        if (data.scheduled_tasks && data.scheduled_tasks.length) {
+            html += `<div class="profile-section" id="profile-sec-task" style="display:none;">
+                <div style="padding:8px 14px;display:flex;gap:8px;align-items:center;">
+                    <input type="text" class="form-input" style="max-width:250px;padding:4px 10px;font-size:11px;" placeholder="Search tasks..." oninput="filterProfileTable(this, 'profile-task-tbody')">
+                </div>
+                <div style="max-height:400px;overflow-y:auto;">
+                <table class="data-table"><thead><tr><th>Name</th><th>Status</th><th>Command</th><th>Run As</th><th>Schedule</th><th>Last Run</th><th>Source</th></tr></thead>
+                <tbody id="profile-task-tbody">
+                ${data.scheduled_tasks.map(t => `<tr>
+                    <td style="color:var(--text-bright);font-size:11px;">${escapeHtml(t.task_name)}</td>
+                    <td style="font-size:11px;">${t.status || '—'}</td>
+                    <td style="font-size:10px;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(t.command||'')}">${escapeHtml(t.command || '—')}</td>
+                    <td style="font-size:11px;color:var(--text-muted);">${t.run_as_user || '—'}</td>
+                    <td style="font-size:10px;color:var(--text-muted);">${t.trigger_info || '—'}</td>
+                    <td style="font-size:10px;color:var(--text-muted);">${t.last_run || '—'}</td>
+                    <td><span class="badge badge-blue" style="font-size:9px;">${t.source || '—'}</span></td>
+                </tr>`).join('')}
+                </tbody></table>
+                </div>
+            </div>`;
+        }
+
+        // Local Groups section
+        if (data.local_groups && data.local_groups.length) {
+            html += `<div class="profile-section" id="profile-sec-grp" style="display:none;">
+                <div style="max-height:400px;overflow-y:auto;">
+                <table class="data-table"><thead><tr><th>Group</th><th>Type</th><th>Members</th><th>Description</th></tr></thead>
+                <tbody>
+                ${data.local_groups.map(g => {
+                    const members = JSON.parse(g.members || '[]');
+                    const privBadge = g.is_privileged ? ' <span class="badge badge-red" style="font-size:8px;">PRIVILEGED</span>' : '';
+                    return `<tr>
+                        <td style="color:var(--text-bright);font-size:11px;">${escapeHtml(g.group_name)}${privBadge}</td>
+                        <td style="font-size:11px;color:var(--text-muted);">${g.group_type || 'local'}</td>
+                        <td style="font-size:10px;color:var(--text-secondary);">${members.length > 0 ? members.map(m => escapeHtml(m)).join(', ') : '<span style="color:var(--text-muted)">—</span>'}</td>
+                        <td style="font-size:10px;color:var(--text-muted);">${g.description || '—'}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody></table>
+                </div>
+            </div>`;
+        }
+
+        // SMB Shares section
+        if (data.smb_shares && data.smb_shares.length) {
+            html += `<div class="profile-section" id="profile-sec-smb" style="display:none;">
+                <table class="data-table"><thead><tr><th>Share Name</th><th>Type</th><th>Comment</th></tr></thead>
+                <tbody>
+                ${data.smb_shares.map(s => {
+                    const typeColor = s.share_type === 'Disk' ? 'var(--accent-cyan)' : s.share_type === 'IPC' ? 'var(--accent-amber)' : 'var(--text-muted)';
+                    return `<tr>
+                        <td style="color:var(--text-bright);font-weight:500;font-size:12px;">${escapeHtml(s.share_name)}</td>
+                        <td><span style="color:${typeColor};font-size:11px;">${s.share_type || '—'}</span></td>
+                        <td style="font-size:11px;color:var(--text-muted);">${s.comment || '—'}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody></table>
+            </div>`;
+        }
+
+        html += `</div>`;
+        container.innerHTML = html;
+    }
+
+    function switchProfileSection(sectionId, el) {
+        // Hide all sections, show selected
+        document.querySelectorAll('.profile-section').forEach(s => s.style.display = 'none');
+        const target = document.getElementById(`profile-sec-${sectionId}`);
+        if (target) target.style.display = 'block';
+
+        // Update sub-tab styles
+        document.querySelectorAll('.profile-sub-tab').forEach(t => {
+            t.classList.remove('profile-sub-tab-active');
+            t.style.color = 'var(--text-muted)';
+            t.style.borderBottom = '2px solid transparent';
+        });
+        el.classList.add('profile-sub-tab-active');
+        el.style.color = 'var(--accent-cyan)';
+        el.style.borderBottom = '2px solid var(--accent-cyan)';
+    }
+
+    function filterProfileTable(input, tbodyId) {
+        const text = input.value.toLowerCase();
+        const tbody = document.getElementById(tbodyId);
+        if (!tbody) return;
+        Array.from(tbody.rows).forEach(row => {
+            row.style.display = row.textContent.toLowerCase().includes(text) ? '' : 'none';
+        });
     }
 
     // ── Host Detail ──

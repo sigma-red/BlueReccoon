@@ -673,6 +673,34 @@ def get_host_smb_shares(host_id):
     return jsonify([dict(r) for r in rows])
 
 # ---------------------------------------------------------------------------
+# API - Host Profiles (aggregated view)
+# ---------------------------------------------------------------------------
+@app.route('/api/missions/<int:mission_id>/host_profiles', methods=['GET'])
+@login_required
+def get_host_profiles(mission_id):
+    db = get_db()
+    hosts = db.execute("""
+        SELECT h.id, h.ip_address, h.hostname, h.domain, h.os_name, h.os_version,
+            h.device_type, h.criticality,
+            (SELECT COUNT(*) FROM software_inventory WHERE host_id = h.id) as software_count,
+            (SELECT COUNT(*) FROM running_processes WHERE host_id = h.id AND is_service = 0) as process_count,
+            (SELECT COUNT(*) FROM running_processes WHERE host_id = h.id AND is_service = 1) as service_count,
+            (SELECT COUNT(*) FROM scheduled_tasks WHERE host_id = h.id) as task_count,
+            (SELECT COUNT(*) FROM local_groups WHERE host_id = h.id) as group_count,
+            (SELECT COUNT(*) FROM smb_shares WHERE host_id = h.id) as smb_share_count
+        FROM hosts h
+        WHERE h.mission_id = ?
+        AND (
+            (SELECT COUNT(*) FROM software_inventory WHERE host_id = h.id) > 0
+            OR (SELECT COUNT(*) FROM running_processes WHERE host_id = h.id) > 0
+            OR (SELECT COUNT(*) FROM scheduled_tasks WHERE host_id = h.id) > 0
+            OR (SELECT COUNT(*) FROM local_groups WHERE host_id = h.id) > 0
+        )
+        ORDER BY h.ip_address
+    """, (mission_id,)).fetchall()
+    return jsonify([dict(h) for h in hosts])
+
+# ---------------------------------------------------------------------------
 # API - Subnets
 # ---------------------------------------------------------------------------
 @app.route('/api/missions/<int:mission_id>/subnets', methods=['GET'])
