@@ -147,7 +147,7 @@ class ServiceScanner(BaseScanner):
                     if ip in nmap_results and port in nmap_results[ip]:
                         continue
                     result = self._grab_banner(ip, port)
-                    if result:
+                    if result and result.get('state') != 'closed':
                         total_banners += 1
                         self.submit_service(ip, port, proto, **result)
                     total_services += 1
@@ -168,7 +168,7 @@ class ServiceScanner(BaseScanner):
                         continue
 
                     result = self._grab_banner(ip, port)
-                    if result:
+                    if result and result.get('state') != 'closed':
                         total_banners += 1
                         self.submit_service(ip, port, proto, **result)
                     total_services += 1
@@ -276,6 +276,9 @@ class ServiceScanner(BaseScanner):
             for proto, portid, port_content in port_blocks:
                 state_match = re.search(r'<state state="(\w+)"', port_content)
                 state = state_match.group(1) if state_match else 'unknown'
+
+                if state != 'open':
+                    continue
 
                 port = int(portid)
                 result = {'state': state}
