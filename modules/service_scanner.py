@@ -99,9 +99,8 @@ class ServiceScanner(BaseScanner):
             ).fetchall()
 
             if not services:
-                # If no services known yet, try common ports
-                services = [{'port': p, 'protocol': 'tcp'} for p in [22, 80, 443, 445, 3389]]
-                logger.info(f"No open services in DB for {ip}, trying common ports")
+                logger.debug(f"No open services in DB for {ip}, skipping (run Port Scan first)")
+                continue
 
             host_ports[ip] = [(s['port'], s['protocol']) for s in services]
 
