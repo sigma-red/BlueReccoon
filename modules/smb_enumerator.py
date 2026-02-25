@@ -74,6 +74,28 @@ class SMBEnumerator(BaseScanner):
                         **host_results['domain_info']
                     })
 
+                # Submit SMB shares
+                for share in shares:
+                    self.submit({
+                        'type': 'smb_share',
+                        'ip_address': ip,
+                        'share_name': share['name'],
+                        'share_type': share.get('type', ''),
+                        'comment': share.get('comment', '')
+                    })
+
+                # Submit enumerated users as accounts
+                for user in users:
+                    self.submit({
+                        'type': 'privileged_account',
+                        'account_name': user['name'],
+                        'account_type': 'user',
+                        'domain': host_results.get('domain', ''),
+                        'groups': [],
+                        'is_admin': 0,
+                        'notes': f"Enumerated via SMB on {ip}"
+                    })
+
         self.progress(100, f"SMB enum complete: {enumerated_hosts} hosts, {total_shares} shares, {total_users} users")
 
         return {

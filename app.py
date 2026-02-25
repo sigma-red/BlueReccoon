@@ -325,6 +325,17 @@ def init_db():
         FOREIGN KEY (mission_id) REFERENCES missions(id)
     );
 
+    -- SMB shares enumerated per host
+    CREATE TABLE IF NOT EXISTS smb_shares (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id INTEGER NOT NULL,
+        share_name TEXT NOT NULL,
+        share_type TEXT,          -- Disk, IPC, Printer
+        comment TEXT,
+        collected_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (host_id) REFERENCES hosts(id)
+    );
+
     -- Hunt hypotheses generated from intel + baseline
     CREATE TABLE IF NOT EXISTS hunt_hypotheses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -550,6 +561,7 @@ def get_host_detail(host_id):
     host_services = db.execute("SELECT * FROM running_processes WHERE host_id = ? AND is_service = 1 ORDER BY service_name", (host_id,)).fetchall()
     tasks = db.execute("SELECT * FROM scheduled_tasks WHERE host_id = ? ORDER BY task_name", (host_id,)).fetchall()
     groups = db.execute("SELECT * FROM local_groups WHERE host_id = ? ORDER BY is_privileged DESC, group_name", (host_id,)).fetchall()
+    smb_shares = db.execute("SELECT * FROM smb_shares WHERE host_id = ? ORDER BY share_name", (host_id,)).fetchall()
     return jsonify({
         'host': dict(host),
         'services': [dict(s) for s in services],
@@ -560,6 +572,7 @@ def get_host_detail(host_id):
         'host_services': [dict(s) for s in host_services],
         'scheduled_tasks': [dict(t) for t in tasks],
         'local_groups': [dict(g) for g in groups],
+        'smb_shares': [dict(s) for s in smb_shares],
     })
 
 @app.route('/api/hosts/<int:host_id>', methods=['PUT'])
@@ -650,6 +663,13 @@ def get_host_tasks(host_id):
 def get_host_groups(host_id):
     db = get_db()
     rows = db.execute("SELECT * FROM local_groups WHERE host_id = ? ORDER BY is_privileged DESC, group_name", (host_id,)).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/hosts/<int:host_id>/smb_shares', methods=['GET'])
+@login_required
+def get_host_smb_shares(host_id):
+    db = get_db()
+    rows = db.execute("SELECT * FROM smb_shares WHERE host_id = ? ORDER BY share_name", (host_id,)).fetchall()
     return jsonify([dict(r) for r in rows])
 
 # ---------------------------------------------------------------------------
@@ -1084,6 +1104,12 @@ def get_mission_stats(mission_id):
             'tasks': db.execute("SELECT COUNT(*) FROM scheduled_tasks st JOIN hosts h ON st.host_id = h.id WHERE h.mission_id = ?", (mission_id,)).fetchone()[0],
             'groups': db.execute("SELECT COUNT(*) FROM local_groups lg JOIN hosts h ON lg.host_id = h.id WHERE h.mission_id = ?", (mission_id,)).fetchone()[0],
             'hosts_profiled': db.execute("SELECT COUNT(DISTINCT si.host_id) FROM software_inventory si JOIN hosts h ON si.host_id = h.id WHERE h.mission_id = ?", (mission_id,)).fetchone()[0],
+        },
+        'ad': {
+            'domains': db.execute("SELECT COUNT(*) FROM domain_info WHERE mission_id = ?", (mission_id,)).fetchone()[0],
+            'privileged_accounts': db.execute("SELECT COUNT(*) FROM privileged_accounts WHERE mission_id = ? AND is_admin = 1", (mission_id,)).fetchone()[0],
+            'all_accounts': db.execute("SELECT COUNT(*) FROM privileged_accounts WHERE mission_id = ?", (mission_id,)).fetchone()[0],
+            'smb_shares': db.execute("SELECT COUNT(*) FROM smb_shares ss JOIN hosts h ON ss.host_id = h.id WHERE h.mission_id = ?", (mission_id,)).fetchone()[0],
         }
     }
 
@@ -1131,6 +1157,10 @@ def export_mission(mission_id):
         """, (mission_id,)).fetchall()],
         'local_groups': [dict(g) for g in db.execute("""
             SELECT lg.* FROM local_groups lg JOIN hosts h ON lg.host_id = h.id WHERE h.mission_id = ?
+        """, (mission_id,)).fetchall()],
+        'privileged_accounts': [dict(a) for a in db.execute("SELECT * FROM privileged_accounts WHERE mission_id = ?", (mission_id,)).fetchall()],
+        'smb_shares': [dict(s) for s in db.execute("""
+            SELECT ss.* FROM smb_shares ss JOIN hosts h ON ss.host_id = h.id WHERE h.mission_id = ?
         """, (mission_id,)).fetchall()],
         'exported_at': datetime.now(timezone.utc).isoformat()
     }
