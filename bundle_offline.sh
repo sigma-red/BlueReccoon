@@ -28,7 +28,11 @@ echo "================================"
 rm -rf "${BUNDLE_DIR}" "${ARCHIVE}"
 mkdir -p "${WHEELS_DIR}"
 
-# 1. Download all wheels (including transitive deps) for Linux x86_64
+# 1. Download pip/setuptools wheels (needed to bootstrap on air-gapped host)
+echo "[*] Downloading pip and setuptools wheels..."
+pip download pip setuptools wheel --dest "${WHEELS_DIR}" 2>/dev/null || true
+
+# 2. Download all wheels (including transitive deps) for Linux x86_64
 echo "[*] Downloading wheels for all requirements..."
 pip download \
     -r requirements.txt \
@@ -102,31 +106,103 @@ fi
 
 echo "[*] Using: $($PYTHON --version)"
 
-# Create venv
-echo "[*] Creating virtual environment..."
-$PYTHON -m venv "${VENV_DIR}"
-source "${VENV_DIR}/bin/activate"
+USE_VENV=1
 
-# Upgrade pip from local wheel if available
-PIP_WHL=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
-if [ -n "$PIP_WHL" ]; then
-    pip install --no-index "$PIP_WHL" 2>/dev/null || true
+# Try creating venv — handle missing ensurepip (common on Debian/Kali)
+echo "[*] Creating virtual environment..."
+if $PYTHON -m venv "${VENV_DIR}" 2>/dev/null; then
+    echo "[+] venv created with ensurepip"
+    source "${VENV_DIR}/bin/activate"
+elif $PYTHON -m venv --without-pip "${VENV_DIR}" 2>/dev/null; then
+    echo "[*] venv created without pip (ensurepip not available)"
+    source "${VENV_DIR}/bin/activate"
+
+    # Bootstrap pip from bundled wheel
+    PIP_WHL=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
+    SETUPTOOLS_WHL=$(ls "${WHEELS_DIR}"/setuptools-*.whl 2>/dev/null | head -1)
+
+    if [ -n "$PIP_WHL" ]; then
+        echo "[*] Bootstrapping pip from bundled wheel..."
+        $PYTHON "${PIP_WHL}/pip" install --no-index \
+            --find-links "${WHEELS_DIR}" \
+            pip setuptools 2>/dev/null \
+        || $PYTHON -c "
+import subprocess, sys, zipfile, tempfile, os
+whl = '${PIP_WHL}'
+with zipfile.ZipFile(whl) as z:
+    td = tempfile.mkdtemp()
+    z.extractall(td)
+sys.path.insert(0, td)
+from pip._internal.cli.main import main
+sys.exit(main(['install', '--no-index', '--find-links', '${WHEELS_DIR}', 'pip', 'setuptools']))
+"
+    else
+        echo "[!] No pip wheel found in bundle. Trying get-pip fallback..."
+        echo "[!] ERROR: Cannot bootstrap pip. Include pip wheel in the bundle."
+        echo "    Re-run bundle_offline.sh on a connected machine."
+        exit 1
+    fi
+else
+    echo "[!] python3 -m venv failed. Falling back to --user install (no venv)."
+    USE_VENV=0
 fi
 
-# Install all dependencies from local wheels
-echo "[*] Installing dependencies from offline wheels..."
-pip install --no-index --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
+if [ "$USE_VENV" -eq 1 ]; then
+    # Ensure pip is available in the venv
+    if ! command -v pip &>/dev/null; then
+        PIP_WHL=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
+        if [ -n "$PIP_WHL" ]; then
+            $PYTHON -c "
+import subprocess, sys, zipfile, tempfile
+whl = '${PIP_WHL}'
+with zipfile.ZipFile(whl) as z:
+    td = tempfile.mkdtemp()
+    z.extractall(td)
+sys.path.insert(0, td)
+from pip._internal.cli.main import main
+sys.exit(main(['install', '--no-index', '--find-links', '${WHEELS_DIR}', 'pip', 'setuptools']))
+"
+        fi
+    fi
 
-echo ""
-echo "[+] Installation complete!"
-echo ""
-echo "To run BlueReccoon:"
-echo "  cd ${APP_DIR}"
-echo "  source venv/bin/activate"
-echo "  python app.py"
-echo ""
-echo "Or use the run script:"
-echo "  ${SCRIPT_DIR}/run.sh"
+    # Install all dependencies from local wheels
+    echo "[*] Installing dependencies from offline wheels..."
+    pip install --no-index --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
+
+    echo ""
+    echo "[+] Installation complete!"
+    echo ""
+    echo "To run BlueReccoon:"
+    echo "  cd ${APP_DIR}"
+    echo "  source venv/bin/activate"
+    echo "  python app.py"
+    echo ""
+    echo "Or use the run script:"
+    echo "  ${SCRIPT_DIR}/run.sh"
+else
+    # No venv — install to user site-packages
+    echo "[*] Installing dependencies to user site-packages..."
+    PIP_WHL=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
+    $PYTHON "${PIP_WHL}/pip" install --user --no-index \
+        --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt" \
+    2>/dev/null \
+    || $PYTHON -c "
+import sys, zipfile, tempfile
+whl = '${PIP_WHL}'
+with zipfile.ZipFile(whl) as z:
+    td = tempfile.mkdtemp()
+    z.extractall(td)
+sys.path.insert(0, td)
+from pip._internal.cli.main import main
+sys.exit(main(['install', '--user', '--no-index', '--find-links', '${WHEELS_DIR}', '-r', '${APP_DIR}/requirements.txt']))
+"
+    echo ""
+    echo "[+] Installation complete! (installed to ~/.local/lib/python3/)"
+    echo ""
+    echo "To run BlueReccoon:"
+    echo "  cd ${APP_DIR}"
+    echo "  $PYTHON app.py"
+fi
 INSTALL_EOF
 chmod +x "${BUNDLE_DIR}/install.sh"
 
@@ -135,9 +211,11 @@ cat > "${BUNDLE_DIR}/run.sh" << 'RUN_EOF'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="${SCRIPT_DIR}/app"
-source "${APP_DIR}/venv/bin/activate"
+if [ -f "${APP_DIR}/venv/bin/activate" ]; then
+    source "${APP_DIR}/venv/bin/activate"
+fi
 cd "${APP_DIR}"
-exec python app.py "$@"
+exec python3 app.py "$@"
 RUN_EOF
 chmod +x "${BUNDLE_DIR}/run.sh"
 
