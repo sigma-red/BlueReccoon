@@ -33,9 +33,30 @@ echo "[*] Downloading pip and setuptools wheels..."
 pip3 download pip setuptools wheel --dest "${WHEELS_DIR}" || true
 
 # 2. Download all dependencies as wheels for current platform
-#    This grabs both pure-Python (Flask, etc.) and platform-specific wheels
-echo "[*] Downloading all requirement wheels..."
-pip3 download -r requirements.txt --dest "${WHEELS_DIR}"
+#    Use a temp venv so pip downloads ALL transitive deps fresh,
+#    instead of skipping packages already installed on this machine.
+echo "[*] Creating temporary isolated environment for download..."
+TMPVENV=$(mktemp -d)
+python3 -m venv "${TMPVENV}" 2>/dev/null \
+    || python3 -m venv --without-pip "${TMPVENV}" 2>/dev/null
+
+# Bootstrap pip into the temp venv
+TVPIP="${TMPVENV}/bin/pip"
+if [ ! -x "$TVPIP" ]; then
+    PIP_BOOTSTRAP=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
+    "${TMPVENV}/bin/python" -c "
+import sys, zipfile, tempfile
+with zipfile.ZipFile('${PIP_BOOTSTRAP}') as z:
+    td = tempfile.mkdtemp(); z.extractall(td)
+sys.path.insert(0, td)
+from pip._internal.cli.main import main
+sys.exit(main(['install', '--no-index', '${PIP_BOOTSTRAP}']))
+"
+fi
+
+echo "[*] Downloading all requirement wheels (isolated — catches all transitive deps)..."
+"${TMPVENV}/bin/pip" download -r requirements.txt --dest "${WHEELS_DIR}"
+rm -rf "${TMPVENV}"
 
 echo "[*] Downloaded $(ls -1 "${WHEELS_DIR}" | wc -l) packages"
 
