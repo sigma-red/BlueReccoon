@@ -28,7 +28,11 @@ echo "================================"
 rm -rf "${BUNDLE_DIR}" "${ARCHIVE}"
 mkdir -p "${WHEELS_DIR}"
 
-# 1. Download all wheels (including transitive deps) for Linux x86_64
+# 1. Download pip/setuptools wheels (needed to bootstrap on air-gapped host)
+echo "[*] Downloading pip and setuptools wheels..."
+pip download pip setuptools wheel --dest "${WHEELS_DIR}" 2>/dev/null || true
+
+# 2. Download all wheels (including transitive deps) for Linux x86_64
 echo "[*] Downloading wheels for all requirements..."
 pip download \
     -r requirements.txt \
@@ -102,31 +106,89 @@ fi
 
 echo "[*] Using: $($PYTHON --version)"
 
-# Create venv
-echo "[*] Creating virtual environment..."
-$PYTHON -m venv "${VENV_DIR}"
-source "${VENV_DIR}/bin/activate"
+USE_VENV=0
+INSTALL_MODE=""
 
-# Upgrade pip from local wheel if available
-PIP_WHL=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
-if [ -n "$PIP_WHL" ]; then
-    pip install --no-index "$PIP_WHL" 2>/dev/null || true
+# Try creating venv — handle missing python3-venv package (common on Debian/Kali)
+echo "[*] Setting up Python environment..."
+if $PYTHON -m venv "${VENV_DIR}" > /dev/null 2>&1; then
+    echo "[+] venv created successfully"
+    source "${VENV_DIR}/bin/activate"
+    USE_VENV=1
+    INSTALL_MODE="venv"
+else
+    # Clean up any partial venv left behind
+    rm -rf "${VENV_DIR}"
+
+    # Try --without-pip (still needs the venv module to exist)
+    if $PYTHON -m venv --without-pip "${VENV_DIR}" > /dev/null 2>&1; then
+        echo "[+] venv created (without pip — will bootstrap from wheel)"
+        source "${VENV_DIR}/bin/activate"
+        USE_VENV=1
+        INSTALL_MODE="venv-no-pip"
+    else
+        rm -rf "${VENV_DIR}"
+        echo "[!] python3-venv not available — installing to user site-packages"
+        INSTALL_MODE="user"
+    fi
 fi
 
-# Install all dependencies from local wheels
-echo "[*] Installing dependencies from offline wheels..."
-pip install --no-index --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
+# Locate the bundled pip wheel (needed for bootstrap and --user installs)
+PIP_WHL=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
+if [ -z "$PIP_WHL" ]; then
+    echo "[!] ERROR: No pip wheel found in ${WHEELS_DIR}/"
+    echo "    Re-run bundle_offline.sh on an internet-connected machine."
+    exit 1
+fi
 
-echo ""
-echo "[+] Installation complete!"
-echo ""
-echo "To run BlueReccoon:"
-echo "  cd ${APP_DIR}"
-echo "  source venv/bin/activate"
-echo "  python app.py"
-echo ""
-echo "Or use the run script:"
-echo "  ${SCRIPT_DIR}/run.sh"
+# Helper: run pip directly from the wheel zip (works without pip installed)
+run_pip_from_wheel() {
+    $PYTHON -c "
+import sys, zipfile, tempfile, os
+whl = '$PIP_WHL'
+td = tempfile.mkdtemp()
+with zipfile.ZipFile(whl) as z:
+    z.extractall(td)
+sys.path.insert(0, td)
+from pip._internal.cli.main import main
+sys.exit(main(sys.argv[1:]))
+" "$@"
+}
+
+if [ "$INSTALL_MODE" = "venv-no-pip" ]; then
+    # Bootstrap pip + setuptools into the venv from wheel
+    echo "[*] Bootstrapping pip into venv from bundled wheel..."
+    run_pip_from_wheel install --no-index --find-links "${WHEELS_DIR}" pip setuptools
+fi
+
+if [ "$USE_VENV" -eq 1 ]; then
+    # Install deps into the venv
+    echo "[*] Installing dependencies from offline wheels..."
+    pip install --no-index --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
+
+    echo ""
+    echo "[+] Installation complete!"
+    echo ""
+    echo "To run BlueReccoon:"
+    echo "  cd ${APP_DIR}"
+    echo "  source venv/bin/activate"
+    echo "  python app.py"
+    echo ""
+    echo "Or use the run script:"
+    echo "  ${SCRIPT_DIR}/run.sh"
+else
+    # No venv at all — install to ~/.local via --user
+    echo "[*] Installing dependencies to user site-packages..."
+    run_pip_from_wheel install --user --no-index \
+        --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
+
+    echo ""
+    echo "[+] Installation complete! (installed to ~/.local/lib/python3/)"
+    echo ""
+    echo "To run BlueReccoon:"
+    echo "  cd ${APP_DIR}"
+    echo "  $PYTHON app.py"
+fi
 INSTALL_EOF
 chmod +x "${BUNDLE_DIR}/install.sh"
 
@@ -135,9 +197,11 @@ cat > "${BUNDLE_DIR}/run.sh" << 'RUN_EOF'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="${SCRIPT_DIR}/app"
-source "${APP_DIR}/venv/bin/activate"
+if [ -f "${APP_DIR}/venv/bin/activate" ]; then
+    source "${APP_DIR}/venv/bin/activate"
+fi
 cd "${APP_DIR}"
-exec python app.py "$@"
+exec python3 app.py "$@"
 RUN_EOF
 chmod +x "${BUNDLE_DIR}/run.sh"
 
