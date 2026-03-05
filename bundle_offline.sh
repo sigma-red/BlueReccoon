@@ -30,39 +30,14 @@ mkdir -p "${WHEELS_DIR}"
 
 # 1. Download pip/setuptools wheels (needed to bootstrap on air-gapped host)
 echo "[*] Downloading pip and setuptools wheels..."
-pip download pip setuptools wheel --dest "${WHEELS_DIR}" 2>/dev/null || true
+pip3 download pip setuptools wheel --dest "${WHEELS_DIR}" || true
 
-# 2. Download all wheels (including transitive deps) for Linux x86_64
-echo "[*] Downloading wheels for all requirements..."
-pip download \
-    -r requirements.txt \
-    --dest "${WHEELS_DIR}" \
-    --platform manylinux2014_x86_64 \
-    --platform manylinux_2_17_x86_64 \
-    --platform linux_x86_64 \
-    --python-version 3 \
-    --only-binary=:all: \
-    2>/dev/null || true
+# 2. Download all dependencies as wheels for current platform
+#    This grabs both pure-Python (Flask, etc.) and platform-specific wheels
+echo "[*] Downloading all requirement wheels..."
+pip3 download -r requirements.txt --dest "${WHEELS_DIR}"
 
-# Some packages may not have binary wheels — download source as fallback
-echo "[*] Downloading source fallbacks for any missing packages..."
-pip download \
-    -r requirements.txt \
-    --dest "${WHEELS_DIR}" \
-    --no-binary=:none: \
-    2>/dev/null || true
-
-# Deduplicate — keep wheels over sdists when both exist
-echo "[*] Deduplicating packages..."
-cd "${WHEELS_DIR}"
-for whl in *.whl; do
-    [ -f "$whl" ] || continue
-    pkg_name=$(echo "$whl" | sed 's/-[0-9].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
-    for tar in ${pkg_name}-*.tar.gz ${pkg_name}-*.zip; do
-        [ -f "$tar" ] && rm -f "$tar"
-    done
-done
-cd - > /dev/null
+echo "[*] Downloaded $(ls -1 "${WHEELS_DIR}" | wc -l) packages"
 
 # 2. Copy the application code
 echo "[*] Copying BlueReccoon application..."
@@ -162,9 +137,10 @@ if [ "$INSTALL_MODE" = "venv-no-pip" ]; then
 fi
 
 if [ "$USE_VENV" -eq 1 ]; then
-    # Install deps into the venv
+    # Install deps into the venv — always use $PYTHON -m pip to ensure we
+    # invoke the venv's pip, not a stale system pip (e.g. Python 2.7)
     echo "[*] Installing dependencies from offline wheels..."
-    pip install --no-index --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
+    $PYTHON -m pip install --no-index --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
 
     echo ""
     echo "[+] Installation complete!"
