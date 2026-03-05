@@ -32,19 +32,20 @@ mkdir -p "${WHEELS_DIR}"
 echo "[*] Downloading pip and setuptools wheels..."
 pip3 download pip setuptools wheel --dest "${WHEELS_DIR}" || true
 
-# 2. Download all dependencies as wheels for current platform
-#    Use a temp venv so pip downloads ALL transitive deps fresh,
-#    instead of skipping packages already installed on this machine.
-echo "[*] Creating temporary isolated environment for download..."
-TMPVENV=$(mktemp -d)
-python3 -m venv "${TMPVENV}" 2>/dev/null \
-    || python3 -m venv --without-pip "${TMPVENV}" 2>/dev/null
+# 2. Download ALL pinned dependencies (requirements-lock.txt has every
+#    transitive dep explicitly listed — no resolver surprises on target)
+LOCK_FILE="requirements-lock.txt"
+if [ ! -f "$LOCK_FILE" ]; then
+    echo "[!] requirements-lock.txt not found — generating from requirements.txt..."
+    TMPVENV=$(mktemp -d)
+    python3 -m venv "${TMPVENV}" 2>/dev/null \
+        || python3 -m venv --without-pip "${TMPVENV}" 2>/dev/null
 
-# Bootstrap pip into the temp venv
-TVPIP="${TMPVENV}/bin/pip"
-if [ ! -x "$TVPIP" ]; then
-    PIP_BOOTSTRAP=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
-    "${TMPVENV}/bin/python" -c "
+    # Bootstrap pip in temp venv
+    TVPIP="${TMPVENV}/bin/pip"
+    if [ ! -x "$TVPIP" ]; then
+        PIP_BOOTSTRAP=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
+        "${TMPVENV}/bin/python" -c "
 import sys, zipfile, tempfile
 with zipfile.ZipFile('${PIP_BOOTSTRAP}') as z:
     td = tempfile.mkdtemp(); z.extractall(td)
@@ -52,13 +53,38 @@ sys.path.insert(0, td)
 from pip._internal.cli.main import main
 sys.exit(main(['install', '--no-index', '${PIP_BOOTSTRAP}']))
 "
+    fi
+
+    "${TMPVENV}/bin/pip" install -r requirements.txt > /dev/null 2>&1
+    "${TMPVENV}/bin/pip" freeze > "$LOCK_FILE"
+    rm -rf "${TMPVENV}"
+    echo "[+] Generated $LOCK_FILE with $(wc -l < "$LOCK_FILE") pinned packages"
 fi
 
-echo "[*] Downloading all requirement wheels (isolated — catches all transitive deps)..."
-"${TMPVENV}/bin/pip" download -r requirements.txt --dest "${WHEELS_DIR}"
-rm -rf "${TMPVENV}"
+echo "[*] Downloading all wheels from lock file..."
+pip3 download -r "$LOCK_FILE" --dest "${WHEELS_DIR}"
 
-echo "[*] Downloaded $(ls -1 "${WHEELS_DIR}" | wc -l) packages"
+# Verify: check every pinned package has a matching file in the wheels dir
+echo "[*] Verifying all packages were downloaded..."
+MISSING=0
+while IFS= read -r line; do
+    # Skip comments and blank lines
+    [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+    pkg=$(echo "$line" | sed 's/[>=<].*//' | tr '[:upper:]' '[:lower:]' | tr '-' '_')
+    if ! ls "${WHEELS_DIR}"/ 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr '-' '_' | grep -qi "^${pkg}"; then
+        echo "    [!] MISSING: $line"
+        MISSING=$((MISSING + 1))
+    fi
+done < "$LOCK_FILE"
+
+if [ "$MISSING" -gt 0 ]; then
+    echo "[!] WARNING: $MISSING package(s) missing from wheels dir"
+    echo "    The air-gapped install may fail. Check errors above."
+else
+    echo "[+] All $(grep -v '^#' "$LOCK_FILE" | grep -v '^$' | wc -l) packages verified in wheels dir"
+fi
+
+echo "[*] Downloaded $(ls -1 "${WHEELS_DIR}" | wc -l) files total"
 
 # 2. Copy the application code
 echo "[*] Copying BlueReccoon application..."
@@ -154,8 +180,12 @@ sys.exit(main(sys.argv[1:]))
 if [ "$USE_VENV" -eq 1 ]; then
     # Install deps into the venv — use run_pip_from_wheel for all cases
     # since pip may not be installed in the venv itself (--without-pip path)
+    # Use lock file (every dep pinned) if available, else fall back to requirements.txt
+    REQ_FILE="${APP_DIR}/requirements-lock.txt"
+    [ ! -f "$REQ_FILE" ] && REQ_FILE="${APP_DIR}/requirements.txt"
     echo "[*] Installing dependencies from offline wheels..."
-    run_pip_from_wheel install --no-index --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
+    echo "    Using: $(basename "$REQ_FILE")"
+    run_pip_from_wheel install --no-index --find-links "${WHEELS_DIR}" -r "${REQ_FILE}"
 
     echo ""
     echo "[+] Installation complete!"
@@ -169,9 +199,12 @@ if [ "$USE_VENV" -eq 1 ]; then
     echo "  ${SCRIPT_DIR}/run.sh"
 else
     # No venv at all — install to ~/.local via --user
+    REQ_FILE="${APP_DIR}/requirements-lock.txt"
+    [ ! -f "$REQ_FILE" ] && REQ_FILE="${APP_DIR}/requirements.txt"
     echo "[*] Installing dependencies to user site-packages..."
+    echo "    Using: $(basename "$REQ_FILE")"
     run_pip_from_wheel install --user --no-index \
-        --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
+        --find-links "${WHEELS_DIR}" -r "${REQ_FILE}"
 
     echo ""
     echo "[+] Installation complete! (installed to ~/.local/lib/python3/)"
