@@ -476,6 +476,24 @@
                 risk: 'Low. Auth queries generate Windows Event 4662. LDAP binds appear in DC auth logs.',
             }
         },
+        bloodhound_map: {
+            name: 'BloodHound AD Mapping', brief: 'Map AD attack paths — group memberships, ACLs, delegation, admin rights', mode: 'active',
+            detail: {
+                summary: 'Uses BloodHound.py (Python ingestor) to collect Active Directory relationships — users, groups, computers, sessions, ACLs, trusts — and identifies privilege escalation paths (e.g., who can reach Domain Admin). Produces attack path analysis with MITRE ATT&CK mapping.',
+                network_actions: [
+                    '<code>LDAP search</code> queries to enumerate all AD objects: users, groups, computers, OUs, GPOs, containers',
+                    '<code>LDAP ACL reads</code> — reads DACLs/SACLs on AD objects to map permissions (GenericAll, WriteDacl, WriteOwner, etc.)',
+                    '<code>LDAP SPN queries</code> — identifies Kerberoastable and AS-REP Roastable accounts',
+                    'If session collection enabled: <code>NetSessionEnum</code> (TCP 445) to map logged-on users on computers',
+                    'If local admin collection enabled: <code>NetLocalGroupGetMembers</code> (TCP 445) to map local admin rights',
+                    'All operations are <strong>read-only</strong> — no AD objects created, modified, or deleted',
+                ],
+                tools_used: 'bloodhound-python (pip install bloodhound) — pure Python, no SharpHound needed',
+                ports_touched: '389/tcp (LDAP), 636/tcp (LDAPS), 445/tcp (SMB for sessions/local admins), 88/tcp (Kerberos)',
+                protocols: 'LDAP, LDAPS, SMB/CIFS, Kerberos',
+                risk: 'Low-moderate. Heavy LDAP queries generate Windows Event 4662. Session enumeration (SMB) visible in target audit logs. High volume of LDAP reads may trigger SIEM alerts.',
+            }
+        },
         snmp_enum: {
             name: 'SNMP Enumeration', brief: 'Community string testing and device info', mode: 'active',
             detail: {
@@ -579,7 +597,7 @@
         document.getElementById('otWarning').style.display = type==='ot_scan'?'block':'none';
         document.getElementById('aggrGroup').style.display = ['port_scan','ot_scan','full_active'].includes(type)?'block':'none';
         document.getElementById('udpGroup').style.display = type==='port_scan'?'block':'none';
-        document.getElementById('credFields').style.display = ['smb_enum','ad_enum','host_profile'].includes(type)?'block':'none';
+        document.getElementById('credFields').style.display = ['smb_enum','ad_enum','bloodhound_map','host_profile'].includes(type)?'block':'none';
         document.getElementById('passiveFields').style.display = type==='passive_capture'?'block':'none';
         if (type==='ot_scan') { document.getElementById('aggrSlider').value=2; updateAggr(2); }
     }
@@ -625,7 +643,7 @@
         }
 
         const config = {};
-        if (['smb_enum','ad_enum','host_profile'].includes(selectedType))
+        if (['smb_enum','ad_enum','bloodhound_map','host_profile'].includes(selectedType))
             config.credentials = { domain: document.getElementById('credDomain').value, username: document.getElementById('credUser').value, password: document.getElementById('credPass').value };
         if (selectedType === 'passive_capture') {
             config.interface = document.getElementById('passiveIface').value;

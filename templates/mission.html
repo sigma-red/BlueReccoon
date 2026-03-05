@@ -264,6 +264,8 @@
             ${adStats.domains ? `<div class="stat-card"><div class="stat-value" style="color:var(--accent-amber)">${adStats.domains}</div><div class="stat-label">AD Domains</div></div>` : ''}
             ${adStats.privileged_accounts ? `<div class="stat-card"><div class="stat-value" style="color:var(--accent-red)">${adStats.privileged_accounts}</div><div class="stat-label">Admin Accounts</div></div>` : ''}
             ${adStats.smb_shares ? `<div class="stat-card"><div class="stat-value">${adStats.smb_shares}</div><div class="stat-label">SMB Shares</div></div>` : ''}
+            ${adStats.attack_paths ? `<div class="stat-card"><div class="stat-value" style="color:var(--accent-red)">${adStats.attack_paths}</div><div class="stat-label">Attack Paths</div></div>` : ''}
+            ${adStats.relationships ? `<div class="stat-card"><div class="stat-value">${adStats.relationships}</div><div class="stat-label">AD Relationships</div></div>` : ''}
             ${profileStats.hosts_profiled ? `<div class="stat-card"><div class="stat-value" style="color:var(--accent-green)">${profileStats.hosts_profiled}</div><div class="stat-label">Hosts Profiled</div></div>` : ''}
         `;
     }
@@ -344,10 +346,12 @@
     async function loadAD() {
         const domains = await fetchJSON(`/api/missions/${MISSION_ID}/domain_info`);
         const accounts = await fetchJSON(`/api/missions/${MISSION_ID}/privileged_accounts`);
+        const attackPaths = await fetchJSON(`/api/missions/${MISSION_ID}/ad_attack_paths`);
+        const bhStats = await fetchJSON(`/api/missions/${MISSION_ID}/ad_relationships/stats`);
         const container = document.getElementById('tab-ad');
 
-        if (domains.length === 0 && accounts.length === 0) {
-            container.innerHTML = '<div class="empty-state" style="padding:40px;">No Active Directory data collected yet. Run AD Enumeration or SMB Enumeration scans.</div>';
+        if (domains.length === 0 && accounts.length === 0 && attackPaths.length === 0) {
+            container.innerHTML = '<div class="empty-state" style="padding:40px;">No Active Directory data collected yet. Run AD Enumeration, SMB Enumeration, or BloodHound AD Mapping scans.</div>';
             return;
         }
 
@@ -478,6 +482,86 @@
             }
 
             html += `</div>`;
+        }
+
+        // BloodHound Attack Paths
+        if (attackPaths.length > 0) {
+            const criticalPaths = attackPaths.filter(p => p.severity === 'critical');
+            const highPaths = attackPaths.filter(p => p.severity === 'high');
+            const medPaths = attackPaths.filter(p => p.severity === 'medium');
+
+            html += `<div class="panel" style="margin-bottom:16px;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent-red);text-transform:uppercase;letter-spacing:1px;">
+                        BloodHound Attack Paths (${attackPaths.length})
+                    </span>
+                    <div style="display:flex;gap:6px;">
+                        ${criticalPaths.length ? `<span class="badge badge-red" style="font-size:9px;">${criticalPaths.length} Critical</span>` : ''}
+                        ${highPaths.length ? `<span class="badge badge-amber" style="font-size:9px;">${highPaths.length} High</span>` : ''}
+                        ${medPaths.length ? `<span class="badge badge-blue" style="font-size:9px;">${medPaths.length} Medium</span>` : ''}
+                    </div>
+                </div>`;
+
+            // Critical paths first
+            attackPaths.forEach(path => {
+                const sevColor = path.severity === 'critical' ? 'var(--accent-red)' : path.severity === 'high' ? 'var(--accent-amber)' : 'var(--accent-blue)';
+                const sevBadge = path.severity === 'critical' ? 'badge-red' : path.severity === 'high' ? 'badge-amber' : 'badge-blue';
+                const chain = JSON.parse(path.relationship_chain || '[]');
+
+                html += `<div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span class="badge ${sevBadge}" style="font-size:9px;text-transform:uppercase;">${escapeHtml(path.severity)}</span>
+                            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${sevColor};font-weight:600;">${escapeHtml(path.path_title)}</span>
+                        </div>
+                        ${path.mitre_technique ? `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);background:var(--bg-card);padding:2px 6px;border-radius:3px;">${escapeHtml(path.mitre_technique)}</span>` : ''}
+                    </div>
+                    <div style="font-size:11px;color:var(--text-secondary);line-height:1.4;margin-bottom:4px;">${escapeHtml(path.path_description || '')}</div>
+                    <div style="display:flex;gap:12px;font-size:10px;color:var(--text-muted);">
+                        ${path.source_name ? `<span>Source: <span style="color:var(--text-bright);">${escapeHtml(path.source_name)}</span></span>` : ''}
+                        ${path.target_name ? `<span>Target: <span style="color:${sevColor};">${escapeHtml(path.target_name)}</span></span>` : ''}
+                        ${chain.length ? `<span>Chain: <span style="font-family:'JetBrains Mono',monospace;">${chain.map(c => escapeHtml(c)).join(' → ')}</span></span>` : ''}
+                    </div>
+                </div>`;
+            });
+
+            html += `</div>`;
+        }
+
+        // BloodHound Relationship Summary
+        if (bhStats.total_relationships > 0) {
+            const byType = bhStats.by_type || {};
+            const dangerousRels = ['GenericAll', 'GenericWrite', 'WriteOwner', 'WriteDacl', 'DCSync', 'ForceChangePassword', 'AddMember', 'AllExtendedRights', 'ReadLAPSPassword'];
+            const dangerousEntries = Object.entries(byType).filter(([k]) => dangerousRels.includes(k));
+            const membershipEntries = Object.entries(byType).filter(([k]) => !dangerousRels.includes(k));
+
+            html += `<div class="panel" style="margin-bottom:16px;">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border-primary);display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent-blue);text-transform:uppercase;letter-spacing:1px;">
+                        BloodHound Relationship Map (${bhStats.total_relationships} relationships)
+                    </span>
+                </div>
+                <div style="padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                    <div>
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent-red);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Dangerous Permissions</div>
+                        ${dangerousEntries.length > 0 ? dangerousEntries.map(([rel, count]) =>
+                            `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;">
+                                <span style="color:var(--accent-red);font-family:'JetBrains Mono',monospace;">${escapeHtml(rel)}</span>
+                                <span style="color:var(--text-bright);font-weight:600;">${count}</span>
+                            </div>`
+                        ).join('') : '<span style="color:var(--text-muted);font-size:12px;">None found</span>'}
+                    </div>
+                    <div>
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Group Memberships &amp; Other</div>
+                        ${membershipEntries.length > 0 ? membershipEntries.map(([rel, count]) =>
+                            `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;">
+                                <span style="color:var(--text-secondary);font-family:'JetBrains Mono',monospace;">${escapeHtml(rel)}</span>
+                                <span style="color:var(--text-bright);">${count}</span>
+                            </div>`
+                        ).join('') : '<span style="color:var(--text-muted);font-size:12px;">None found</span>'}
+                    </div>
+                </div>
+            </div>`;
         }
 
         container.innerHTML = html;
