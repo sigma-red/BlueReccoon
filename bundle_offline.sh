@@ -130,17 +130,11 @@ sys.exit(main(sys.argv[1:]))
 " "$@"
 }
 
-if [ "$INSTALL_MODE" = "venv-no-pip" ]; then
-    # Bootstrap pip + setuptools into the venv from wheel
-    echo "[*] Bootstrapping pip into venv from bundled wheel..."
-    run_pip_from_wheel install --no-index --find-links "${WHEELS_DIR}" pip setuptools
-fi
-
 if [ "$USE_VENV" -eq 1 ]; then
-    # Install deps into the venv — always use $PYTHON -m pip to ensure we
-    # invoke the venv's pip, not a stale system pip (e.g. Python 2.7)
+    # Install deps into the venv — use run_pip_from_wheel for all cases
+    # since pip may not be installed in the venv itself (--without-pip path)
     echo "[*] Installing dependencies from offline wheels..."
-    $PYTHON -m pip install --no-index --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
+    run_pip_from_wheel install --no-index --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
 
     echo ""
     echo "[+] Installation complete!"
