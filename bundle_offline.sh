@@ -106,66 +106,63 @@ fi
 
 echo "[*] Using: $($PYTHON --version)"
 
-USE_VENV=1
+USE_VENV=0
+INSTALL_MODE=""
 
-# Try creating venv — handle missing ensurepip (common on Debian/Kali)
-echo "[*] Creating virtual environment..."
-if $PYTHON -m venv "${VENV_DIR}" 2>/dev/null; then
-    echo "[+] venv created with ensurepip"
+# Try creating venv — handle missing python3-venv package (common on Debian/Kali)
+echo "[*] Setting up Python environment..."
+if $PYTHON -m venv "${VENV_DIR}" > /dev/null 2>&1; then
+    echo "[+] venv created successfully"
     source "${VENV_DIR}/bin/activate"
-elif $PYTHON -m venv --without-pip "${VENV_DIR}" 2>/dev/null; then
-    echo "[*] venv created without pip (ensurepip not available)"
-    source "${VENV_DIR}/bin/activate"
+    USE_VENV=1
+    INSTALL_MODE="venv"
+else
+    # Clean up any partial venv left behind
+    rm -rf "${VENV_DIR}"
 
-    # Bootstrap pip from bundled wheel
-    PIP_WHL=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
-    SETUPTOOLS_WHL=$(ls "${WHEELS_DIR}"/setuptools-*.whl 2>/dev/null | head -1)
+    # Try --without-pip (still needs the venv module to exist)
+    if $PYTHON -m venv --without-pip "${VENV_DIR}" > /dev/null 2>&1; then
+        echo "[+] venv created (without pip — will bootstrap from wheel)"
+        source "${VENV_DIR}/bin/activate"
+        USE_VENV=1
+        INSTALL_MODE="venv-no-pip"
+    else
+        rm -rf "${VENV_DIR}"
+        echo "[!] python3-venv not available — installing to user site-packages"
+        INSTALL_MODE="user"
+    fi
+fi
 
-    if [ -n "$PIP_WHL" ]; then
-        echo "[*] Bootstrapping pip from bundled wheel..."
-        $PYTHON "${PIP_WHL}/pip" install --no-index \
-            --find-links "${WHEELS_DIR}" \
-            pip setuptools 2>/dev/null \
-        || $PYTHON -c "
-import subprocess, sys, zipfile, tempfile, os
-whl = '${PIP_WHL}'
+# Locate the bundled pip wheel (needed for bootstrap and --user installs)
+PIP_WHL=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
+if [ -z "$PIP_WHL" ]; then
+    echo "[!] ERROR: No pip wheel found in ${WHEELS_DIR}/"
+    echo "    Re-run bundle_offline.sh on an internet-connected machine."
+    exit 1
+fi
+
+# Helper: run pip directly from the wheel zip (works without pip installed)
+run_pip_from_wheel() {
+    $PYTHON -c "
+import sys, zipfile, tempfile, os
+whl = '$PIP_WHL'
+td = tempfile.mkdtemp()
 with zipfile.ZipFile(whl) as z:
-    td = tempfile.mkdtemp()
     z.extractall(td)
 sys.path.insert(0, td)
 from pip._internal.cli.main import main
-sys.exit(main(['install', '--no-index', '--find-links', '${WHEELS_DIR}', 'pip', 'setuptools']))
-"
-    else
-        echo "[!] No pip wheel found in bundle. Trying get-pip fallback..."
-        echo "[!] ERROR: Cannot bootstrap pip. Include pip wheel in the bundle."
-        echo "    Re-run bundle_offline.sh on a connected machine."
-        exit 1
-    fi
-else
-    echo "[!] python3 -m venv failed. Falling back to --user install (no venv)."
-    USE_VENV=0
+sys.exit(main(sys.argv[1:]))
+" "$@"
+}
+
+if [ "$INSTALL_MODE" = "venv-no-pip" ]; then
+    # Bootstrap pip + setuptools into the venv from wheel
+    echo "[*] Bootstrapping pip into venv from bundled wheel..."
+    run_pip_from_wheel install --no-index --find-links "${WHEELS_DIR}" pip setuptools
 fi
 
 if [ "$USE_VENV" -eq 1 ]; then
-    # Ensure pip is available in the venv
-    if ! command -v pip &>/dev/null; then
-        PIP_WHL=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
-        if [ -n "$PIP_WHL" ]; then
-            $PYTHON -c "
-import subprocess, sys, zipfile, tempfile
-whl = '${PIP_WHL}'
-with zipfile.ZipFile(whl) as z:
-    td = tempfile.mkdtemp()
-    z.extractall(td)
-sys.path.insert(0, td)
-from pip._internal.cli.main import main
-sys.exit(main(['install', '--no-index', '--find-links', '${WHEELS_DIR}', 'pip', 'setuptools']))
-"
-        fi
-    fi
-
-    # Install all dependencies from local wheels
+    # Install deps into the venv
     echo "[*] Installing dependencies from offline wheels..."
     pip install --no-index --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
 
@@ -180,22 +177,11 @@ sys.exit(main(['install', '--no-index', '--find-links', '${WHEELS_DIR}', 'pip', 
     echo "Or use the run script:"
     echo "  ${SCRIPT_DIR}/run.sh"
 else
-    # No venv — install to user site-packages
+    # No venv at all — install to ~/.local via --user
     echo "[*] Installing dependencies to user site-packages..."
-    PIP_WHL=$(ls "${WHEELS_DIR}"/pip-*.whl 2>/dev/null | head -1)
-    $PYTHON "${PIP_WHL}/pip" install --user --no-index \
-        --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt" \
-    2>/dev/null \
-    || $PYTHON -c "
-import sys, zipfile, tempfile
-whl = '${PIP_WHL}'
-with zipfile.ZipFile(whl) as z:
-    td = tempfile.mkdtemp()
-    z.extractall(td)
-sys.path.insert(0, td)
-from pip._internal.cli.main import main
-sys.exit(main(['install', '--user', '--no-index', '--find-links', '${WHEELS_DIR}', '-r', '${APP_DIR}/requirements.txt']))
-"
+    run_pip_from_wheel install --user --no-index \
+        --find-links "${WHEELS_DIR}" -r "${APP_DIR}/requirements.txt"
+
     echo ""
     echo "[+] Installation complete! (installed to ~/.local/lib/python3/)"
     echo ""
