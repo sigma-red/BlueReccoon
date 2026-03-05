@@ -112,6 +112,9 @@ class ScanEngine:
                 elif job_type == 'host_profile':
                     from modules.host_profiler import HostProfiler
                     scanner = HostProfiler(self, scan_id, mission_id, target, config, stop_flag)
+                elif job_type == 'bloodhound_map':
+                    from modules.bloodhound_mapper import BloodHoundMapper
+                    scanner = BloodHoundMapper(self, scan_id, mission_id, target, config, stop_flag)
                 else:
                     raise ValueError(f"Unknown scan type: {job_type}")
 
@@ -211,6 +214,10 @@ class ScanEngine:
                 self._ingest_smb_share(db, result)
             elif rtype == 'host_update':
                 self._update_host_fields(db, result)
+            elif rtype == 'ad_relationship':
+                self._ingest_ad_relationship(db, result)
+            elif rtype == 'ad_attack_path':
+                self._ingest_ad_attack_path(db, result)
 
             db.commit()
 
@@ -686,6 +693,46 @@ class ScanEngine:
                 host_id, share_name,
                 result.get('share_type', ''),
                 result.get('comment', '')
+            ))
+
+    def _ingest_ad_relationship(self, db, result):
+        """Insert an AD relationship discovered by BloodHound."""
+        mission_id = result['mission_id']
+        # Avoid exact duplicates
+        existing = db.execute(
+            """SELECT id FROM ad_relationships WHERE mission_id = ? AND source_name = ?
+               AND target_name = ? AND relationship = ?""",
+            (mission_id, result['source_name'], result['target_name'], result['relationship'])
+        ).fetchone()
+        if not existing:
+            db.execute("""
+                INSERT INTO ad_relationships (mission_id, source_name, source_type,
+                    target_name, target_type, relationship, is_inherited)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                mission_id, result['source_name'], result.get('source_type', ''),
+                result['target_name'], result.get('target_type', ''),
+                result['relationship'], result.get('is_inherited', 0)
+            ))
+
+    def _ingest_ad_attack_path(self, db, result):
+        """Insert an AD attack path identified by BloodHound analysis."""
+        mission_id = result['mission_id']
+        # Avoid exact duplicates
+        existing = db.execute(
+            "SELECT id FROM ad_attack_paths WHERE mission_id = ? AND path_title = ?",
+            (mission_id, result['path_title'])
+        ).fetchone()
+        if not existing:
+            db.execute("""
+                INSERT INTO ad_attack_paths (mission_id, path_title, path_description,
+                    severity, source_name, target_name, relationship_chain, mitre_technique)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                mission_id, result['path_title'], result.get('path_description', ''),
+                result.get('severity', 'medium'), result.get('source_name', ''),
+                result.get('target_name', ''), result.get('relationship_chain', '[]'),
+                result.get('mitre_technique', '')
             ))
 
     def _update_host_fields(self, db, result):

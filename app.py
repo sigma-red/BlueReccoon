@@ -364,6 +364,35 @@ def init_db():
         imported_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (mission_id) REFERENCES missions(id)
     );
+
+    -- AD relationships mapped by BloodHound
+    CREATE TABLE IF NOT EXISTS ad_relationships (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mission_id INTEGER NOT NULL,
+        source_name TEXT NOT NULL,
+        source_type TEXT,           -- User, Group, Computer, Domain, GPO, OU
+        target_name TEXT NOT NULL,
+        target_type TEXT,           -- User, Group, Computer, Domain, GPO, OU
+        relationship TEXT NOT NULL, -- MemberOf, AdminTo, GenericAll, GenericWrite, WriteOwner, WriteDacl, ForceChangePassword, AddMember, DCSync, AllExtendedRights, ReadLAPSPassword, AllowedToDelegate, etc.
+        is_inherited INTEGER DEFAULT 0,
+        discovered_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (mission_id) REFERENCES missions(id)
+    );
+
+    -- AD attack paths identified by BloodHound analysis
+    CREATE TABLE IF NOT EXISTS ad_attack_paths (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mission_id INTEGER NOT NULL,
+        path_title TEXT NOT NULL,
+        path_description TEXT,
+        severity TEXT DEFAULT 'medium',  -- critical, high, medium, low
+        source_name TEXT,
+        target_name TEXT,
+        relationship_chain TEXT,  -- JSON array of relationships forming the path
+        mitre_technique TEXT,     -- MITRE ATT&CK technique ID
+        discovered_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (mission_id) REFERENCES missions(id)
+    );
     """)
     db.commit()
     db.close()
@@ -499,6 +528,8 @@ def delete_mission(mission_id):
     db.execute("DELETE FROM connections WHERE mission_id = ?", (mission_id,))
     db.execute("DELETE FROM domain_info WHERE mission_id = ?", (mission_id,))
     db.execute("DELETE FROM privileged_accounts WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM ad_relationships WHERE mission_id = ?", (mission_id,))
+    db.execute("DELETE FROM ad_attack_paths WHERE mission_id = ?", (mission_id,))
     db.execute("DELETE FROM threat_intel WHERE mission_id = ?", (mission_id,))
     db.execute("DELETE FROM hunt_hypotheses WHERE mission_id = ?", (mission_id,))
     db.execute("DELETE FROM scan_activity_log WHERE mission_id = ?", (mission_id,))
@@ -1101,6 +1132,68 @@ def get_privileged_accounts(mission_id):
     return jsonify([dict(a) for a in accounts])
 
 # ---------------------------------------------------------------------------
+# API - BloodHound AD Relationships & Attack Paths
+# ---------------------------------------------------------------------------
+@app.route('/api/missions/<int:mission_id>/ad_relationships', methods=['GET'])
+@login_required
+def get_ad_relationships(mission_id):
+    db = get_db()
+    rel_type = request.args.get('relationship')
+    source_type = request.args.get('source_type')
+    target_type = request.args.get('target_type')
+
+    query = "SELECT * FROM ad_relationships WHERE mission_id = ?"
+    params = [mission_id]
+
+    if rel_type:
+        query += " AND relationship = ?"
+        params.append(rel_type)
+    if source_type:
+        query += " AND source_type = ?"
+        params.append(source_type)
+    if target_type:
+        query += " AND target_type = ?"
+        params.append(target_type)
+
+    query += " ORDER BY relationship, source_name"
+    rels = db.execute(query, params).fetchall()
+    return jsonify([dict(r) for r in rels])
+
+@app.route('/api/missions/<int:mission_id>/ad_attack_paths', methods=['GET'])
+@login_required
+def get_ad_attack_paths(mission_id):
+    db = get_db()
+    severity = request.args.get('severity')
+
+    query = "SELECT * FROM ad_attack_paths WHERE mission_id = ?"
+    params = [mission_id]
+    if severity:
+        query += " AND severity = ?"
+        params.append(severity)
+
+    query += " ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
+    paths = db.execute(query, params).fetchall()
+    return jsonify([dict(p) for p in paths])
+
+@app.route('/api/missions/<int:mission_id>/ad_relationships/stats', methods=['GET'])
+@login_required
+def get_ad_relationship_stats(mission_id):
+    db = get_db()
+    total = db.execute("SELECT COUNT(*) FROM ad_relationships WHERE mission_id = ?", (mission_id,)).fetchone()[0]
+    by_type = db.execute(
+        "SELECT relationship, COUNT(*) as count FROM ad_relationships WHERE mission_id = ? GROUP BY relationship ORDER BY count DESC",
+        (mission_id,)
+    ).fetchall()
+    attack_paths = db.execute("SELECT COUNT(*) FROM ad_attack_paths WHERE mission_id = ?", (mission_id,)).fetchone()[0]
+    critical_paths = db.execute("SELECT COUNT(*) FROM ad_attack_paths WHERE mission_id = ? AND severity = 'critical'", (mission_id,)).fetchone()[0]
+    return jsonify({
+        'total_relationships': total,
+        'by_type': {r['relationship']: r['count'] for r in by_type},
+        'total_attack_paths': attack_paths,
+        'critical_paths': critical_paths,
+    })
+
+# ---------------------------------------------------------------------------
 # API - Stats/Metrics
 # ---------------------------------------------------------------------------
 @app.route('/api/missions/<int:mission_id>/stats', methods=['GET'])
@@ -1138,6 +1231,9 @@ def get_mission_stats(mission_id):
             'privileged_accounts': db.execute("SELECT COUNT(*) FROM privileged_accounts WHERE mission_id = ? AND is_admin = 1", (mission_id,)).fetchone()[0],
             'all_accounts': db.execute("SELECT COUNT(*) FROM privileged_accounts WHERE mission_id = ?", (mission_id,)).fetchone()[0],
             'smb_shares': db.execute("SELECT COUNT(*) FROM smb_shares ss JOIN hosts h ON ss.host_id = h.id WHERE h.mission_id = ?", (mission_id,)).fetchone()[0],
+            'relationships': db.execute("SELECT COUNT(*) FROM ad_relationships WHERE mission_id = ?", (mission_id,)).fetchone()[0],
+            'attack_paths': db.execute("SELECT COUNT(*) FROM ad_attack_paths WHERE mission_id = ?", (mission_id,)).fetchone()[0],
+            'critical_paths': db.execute("SELECT COUNT(*) FROM ad_attack_paths WHERE mission_id = ? AND severity = 'critical'", (mission_id,)).fetchone()[0],
         }
     }
 
@@ -1190,6 +1286,8 @@ def export_mission(mission_id):
         'smb_shares': [dict(s) for s in db.execute("""
             SELECT ss.* FROM smb_shares ss JOIN hosts h ON ss.host_id = h.id WHERE h.mission_id = ?
         """, (mission_id,)).fetchall()],
+        'ad_relationships': [dict(r) for r in db.execute("SELECT * FROM ad_relationships WHERE mission_id = ?", (mission_id,)).fetchall()],
+        'ad_attack_paths': [dict(p) for p in db.execute("SELECT * FROM ad_attack_paths WHERE mission_id = ?", (mission_id,)).fetchall()],
         'exported_at': datetime.now(timezone.utc).isoformat()
     }
     return jsonify(export_data)
